@@ -1,10 +1,14 @@
-    import asyncio
+import asyncio
 import logging
 
 from homeassistant.helpers.entity import SensorEntity
+
+# Abhängig von deiner pymodbus Version
 from pymodbus.client import AsyncModbusTcpClient
 
 _LOGGER = logging.getLogger(__name__)
+
+DOMAIN = "ampere_storagepro_e3"
 
 # ========================
 # Setup Entry
@@ -22,12 +26,36 @@ async def async_setup_entry(hass, entry, async_add_entities):
         # weitere Sensoren hier hinzufügen
     ]
 
+    # Speichere das Device in hass.data für späteres Unload
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "device": device,
+        "sensors": sensors,
+    }
+
     try:
         async_add_entities(sensors, update_before_add=True)
         return True
     except Exception as e:
         _LOGGER.error("Fehler beim Hinzufügen der Sensoren: %s", e)
         return False
+
+
+async def async_unload_entry(hass, entry):
+    """Unload sensors and cleanup."""
+    data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    if not data:
+        _LOGGER.warning("Config Entry %s wurde nie geladen.", entry.entry_id)
+        return True  # bereits „nicht geladen“, trotzdem True zurückgeben
+
+    # Sensoren werden von HA automatisch entfernt
+    device = data.get("device")
+    if device and device.client:
+        try:
+            await device.client.close()
+        except Exception as e:
+            _LOGGER.error("Fehler beim Schließen der Modbus-Verbindung: %s", e)
+
+    return True
 
 # ========================
 # Modbus Device
