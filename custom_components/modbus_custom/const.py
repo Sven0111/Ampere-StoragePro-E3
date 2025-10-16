@@ -1,0 +1,1 @@
+DOMAIN = "ampere_storagepro_e3"
