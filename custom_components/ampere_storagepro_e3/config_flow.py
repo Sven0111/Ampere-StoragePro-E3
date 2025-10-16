@@ -1,6 +1,7 @@
 import voluptuous as vol
 from homeassistant import config_entries
-from .const import DOMAIN
+
+DOMAIN = "ampere_storagepro_e3"
 
 class AmpereStorageProE3ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config Flow für Ampere StoragePro E3."""
@@ -8,8 +9,13 @@ class AmpereStorageProE3ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
+        """Einstiegspunkt beim Hinzufügen über UI."""
         if user_input is not None:
-            return self.async_create_entry(title="Ampere StoragePro E3", data=user_input)
+            # Integrationseintrag erstellen
+            return self.async_create_entry(
+                title=f"Ampere StoragePro E3 ({user_input['host']})",
+                data=user_input,
+            )
 
         schema = vol.Schema({
             vol.Required("host"): str,
