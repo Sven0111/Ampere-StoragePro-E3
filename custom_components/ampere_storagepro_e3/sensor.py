@@ -1,21 +1,37 @@
+    import asyncio
+import logging
+
 from homeassistant.helpers.entity import SensorEntity
 from pymodbus.client import AsyncModbusTcpClient
-import asyncio
 
+_LOGGER = logging.getLogger(__name__)
+
+# ========================
+# Setup Entry
+# ========================
 async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up sensors for Ampere StoragePro E3 via Modbus TCP."""
     host = entry.data.get("host")
-    port = entry.data.get("port")
+    port = entry.data.get("port", 502)
     slave = entry.data.get("slave_id", 1)
 
     device = ModbusDevice(host, port, slave)
 
     sensors = [
         ModbusSensor(device, "kWh Gesamt", 39607, 2, 0.01, "kWh"),
+        # weitere Sensoren hier hinzufügen
     ]
 
-    async_add_entities(sensors, update_before_add=True)
+    try:
+        async_add_entities(sensors, update_before_add=True)
+        return True
+    except Exception as e:
+        _LOGGER.error("Fehler beim Hinzufügen der Sensoren: %s", e)
+        return False
 
-
+# ========================
+# Modbus Device
+# ========================
 class ModbusDevice:
     def __init__(self, host, port, slave):
         self.host = host
@@ -25,17 +41,31 @@ class ModbusDevice:
         self.lock = asyncio.Lock()
 
     async def connect(self):
+        """Create a Modbus TCP connection if not connected."""
         if not self.client:
-            self.client = AsyncModbusTcpClient(self.host, port=self.port)
-            await self.client.connect()
+            try:
+                self.client = AsyncModbusTcpClient(self.host, port=self.port)
+                await asyncio.sleep(0.1)  # kleiner Delay, damit Connection aufgebaut wird
+            except Exception as e:
+                _LOGGER.error("Fehler beim Verbinden mit Modbus-Gerät %s:%s - %s", self.host, self.port, e)
+                self.client = None
 
     async def read_registers(self, address, count):
+        """Read Modbus input registers safely."""
         async with self.lock:
             await self.connect()
-            rr = await self.client.read_input_registers(address, count, slave=self.slave)
-            return rr.registers if rr and rr.registers else None
+            if not self.client:
+                return None
+            try:
+                rr = await self.client.read_input_registers(address, count, slave=self.slave)
+                return rr.registers if rr and rr.registers else None
+            except Exception as e:
+                _LOGGER.error("Fehler beim Lesen der Register %s: %s", address, e)
+                return None
 
-
+# ========================
+# Sensor Entity
+# ========================
 class ModbusSensor(SensorEntity):
     def __init__(self, device, name, address, count, scale, unit):
         self.device = device
@@ -47,6 +77,7 @@ class ModbusSensor(SensorEntity):
         self._attr_native_unit_of_measurement = unit
 
     async def async_update(self):
+        """Update sensor value from Modbus device."""
         try:
             regs = await self.device.read_registers(self.address, self.count)
             if regs:
@@ -56,5 +87,6 @@ class ModbusSensor(SensorEntity):
                 self._attr_native_value = round(raw * self.scale, 2)
             else:
                 self._attr_native_value = None
-        except Exception:
+        except Exception as e:
+            _LOGGER.error("Fehler beim Aktualisieren von Sensor %s: %s", self._attr_name, e)
             self._attr_native_value = None
