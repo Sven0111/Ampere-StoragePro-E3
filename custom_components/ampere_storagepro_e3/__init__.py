@@ -1,22 +1,21 @@
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .sensor import ModbusKwhSensor, ModbusExampleSensor
-from .const import DOMAIN
+from homeassistant.helpers.typing import ConfigType
 
-async def async_setup(hass: HomeAssistant, config: dict):
-    """Setup ohne Config Flow (YAML optional)."""
+DOMAIN = "ampere_storagepro_e3"
+
+async def async_setup(hass: HomeAssistant, config: ConfigType):
+    """YAML-Setup (optional, falls du config.yaml nutzt)."""
     return True
 
-async def async_setup_entry(hass: HomeAssistant, entry, async_add_devices: AddEntitiesCallback):
-    """Setup über UI (Config Flow)."""
-    host = entry.data.get("host")
-    port = entry.data.get("port")
-    slave_id = entry.data.get("slave_id")
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+    """Setup über die UI (Config Flow)."""
+    hass.async_create_task(
+        hass.config_entries.async_forward_entry_setup(entry, "sensor")
+    )
+    return True
 
-    sensors = [
-        ModbusKwhSensor(host, port, slave_id),
-        ModbusExampleSensor(host, port, slave_id)
-    ]
-
-    async_add_devices(sensors)
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
+    """Integration entladen."""
+    await hass.config_entries.async_forward_entry_unload(entry, "sensor")
     return True
