@@ -13,6 +13,7 @@ DOMAIN = "ampere_storagepro_e3"
 # ========================
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up sensors for Ampere StoragePro E3 via Modbus TCP."""
+    _LOGGER.info("Ampere StoragePro E3: Setup Entry gestartet für %s:%s", host, port)
     host = entry.data.get("host")
     port = entry.data.get("port", 502)
     slave = entry.data.get("slave_id", 1)
@@ -32,6 +33,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     try:
         async_add_entities(sensors, update_before_add=True)
+        _LOGGER.info("Ampere StoragePro E3: Sensoren hinzugefügt: %s", [s._attr_name for s in sensors])
         return True
     except Exception as e:
         _LOGGER.error("Fehler beim Hinzufügen der Sensoren: %s", e)
