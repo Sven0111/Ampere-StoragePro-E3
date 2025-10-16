@@ -2,6 +2,8 @@
   "domain": "ampere_storagepro_e3",
   "name": "Ampere StoragePro E3",
   "version": "0.0.1",
+  "documentation": "https://github.com/Sven0111/Ampere-StoragePro-E3",
   "requirements": ["pymodbus==3.6.8"],
+  "dependencies": [],
   "codeowners": ["@Sven0111"]
 }
