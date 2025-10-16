@@ -1,28 +1,19 @@
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import aiohttp_client
-from pymodbus.client import AsyncModbusTcpClient
-
+from homeassistant.helpers.typing import ConfigType
 from .const import DOMAIN
+from .sensor import ModbusKwhSensor
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    host = entry.data["host"]
-    port = entry.data["port"]
-
-    client = AsyncModbusTcpClient(host, port=port)
-    await client.connect()
-
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        "client": client,
-        "slave_id": entry.data["slave_id"]
-    }
-
-    hass.config_entries.async_setup_platforms(entry, ["sensor"])
+async def async_setup(hass: HomeAssistant, config: ConfigType):
+    """Setup ohne Config Flow (YAML optional)."""
     return True
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
-    data = hass.data[DOMAIN].pop(entry.entry_id)
-    client = data["client"]
-    await client.close()
+async def async_setup_entry(hass, entry, async_add_devices: AddEntitiesCallback):
+    """Setup über UI (Config Flow)."""
+    host = entry.data.get("host")
+    port = entry.data.get("port")
+    slave_id = entry.data.get("slave_id")
+
+    sensor = ModbusKwhSensor(host, port, slave_id)
+    async_add_devices([sensor])
     return True
