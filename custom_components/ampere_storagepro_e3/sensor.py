@@ -2,8 +2,6 @@ import asyncio
 import logging
 
 from homeassistant.helpers.entity import SensorEntity
-
-# Abhängig von deiner pymodbus Version
 from pymodbus.client import AsyncModbusTcpClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,10 +21,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     sensors = [
         ModbusSensor(device, "kWh Gesamt", 39607, 2, 0.01, "kWh"),
-        # weitere Sensoren hier hinzufügen
+        # Weitere Sensoren hier hinzufügen
     ]
 
-    # Speichere das Device in hass.data für späteres Unload
+    # Speicher Device & Sensoren für Unload
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "device": device,
         "sensors": sensors,
@@ -39,15 +37,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
         _LOGGER.error("Fehler beim Hinzufügen der Sensoren: %s", e)
         return False
 
-
 async def async_unload_entry(hass, entry):
     """Unload sensors and cleanup."""
     data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if not data:
         _LOGGER.warning("Config Entry %s wurde nie geladen.", entry.entry_id)
-        return True  # bereits „nicht geladen“, trotzdem True zurückgeben
+        return True
 
-    # Sensoren werden von HA automatisch entfernt
     device = data.get("device")
     if device and device.client:
         try:
@@ -73,9 +69,14 @@ class ModbusDevice:
         if not self.client:
             try:
                 self.client = AsyncModbusTcpClient(self.host, port=self.port)
-                await asyncio.sleep(0.1)  # kleiner Delay, damit Connection aufgebaut wird
+                await asyncio.sleep(0.1)  # Delay, um Verbindung aufzubauen
             except Exception as e:
-                _LOGGER.error("Fehler beim Verbinden mit Modbus-Gerät %s:%s - %s", self.host, self.port, e)
+                _LOGGER.error(
+                    "Fehler beim Verbinden mit Modbus-Gerät %s:%s - %s",
+                    self.host,
+                    self.port,
+                    e,
+                )
                 self.client = None
 
     async def read_registers(self, address, count):
