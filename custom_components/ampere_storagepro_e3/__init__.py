@@ -1,15 +1,14 @@
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.typing import ConfigType
 
 DOMAIN = "ampere_storagepro_e3"
 
-async def async_setup(hass: HomeAssistant, config: ConfigType):
-    """YAML-Setup (optional, falls du config.yaml nutzt)."""
+async def async_setup(hass: HomeAssistant, config: dict):
+    """Setup bei YAML-Konfiguration (nicht nötig, da UI)."""
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Setup über die UI (Config Flow)."""
+    """Setup über die Benutzeroberfläche (Config Flow)."""
     hass.async_create_task(
         hass.config_entries.async_forward_entry_setup(entry, "sensor")
     )

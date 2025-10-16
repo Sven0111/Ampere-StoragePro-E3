@@ -1,17 +1,20 @@
-async def async_setup_entry(hass, entry, async_add_devices: AddEntitiesCallback):
-    """Setup über UI (Config Flow)."""
-    host = entry.data.get("host")
-    port = entry.data.get("port")
-    slave_id = entry.data.get("slave_id")
+import voluptuous as vol
+from homeassistant import config_entries
+from .const import DOMAIN
 
-    # Gemeinsamer Modbus-Client für alle Sensoren
-    device = ModbusDevice(host, port, slave_id)
+class AmpereStorageProE3ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Config Flow für Ampere StoragePro E3."""
 
-    # Sensoren erstellen
-    sensors = [
-        ModbusSensor(device, "kWh Gesamt", 39607, count=2, scale=0.01, unit="kWh"),
-    ]
+    VERSION = 1
 
-    # HA die Sensoren registrieren
-    async_add_devices(sensors)
-    return True
+    async def async_step_user(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(title="Ampere StoragePro E3", data=user_input)
+
+        schema = vol.Schema({
+            vol.Required("host"): str,
+            vol.Required("port", default=502): int,
+            vol.Required("slave_id", default=1): int,
+        })
+
+        return self.async_show_form(step_id="user", data_schema=schema)
