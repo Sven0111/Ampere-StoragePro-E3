@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from homeassistant.helpers.entity import SensorEntity
+from homeassistant.components.sensor import SensorEntity
 from pymodbus.client.async_tcp import AsyncModbusTcpClient
 
 _LOGGER = logging.getLogger(__name__)
