@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from homeassistant.components.sensor import SensorEntity
-from pymodbus.client.async_tcp import AsyncModbusTcpClient
+from pymodbus.client import AsyncModbusTcpClient
 
 _LOGGER = logging.getLogger(__name__)
 DOMAIN = "ampere_storagepro_e3"
@@ -43,17 +43,14 @@ class ModbusDevice:
         self.lock = asyncio.Lock()
 
     async def connect(self):
-        """Create Modbus TCP connection if not connected."""
         if not self.client:
             self.client = AsyncModbusTcpClient(self.host, port=self.port)
-            await asyncio.sleep(0.1)
+            await self.client.connect()  # wichtig in >=3.6.8
 
     async def read_registers(self, address, count):
-        """Read Modbus input registers safely."""
         async with self.lock:
             await self.connect()
             if not self.client:
-                _LOGGER.error("Modbus Client nicht verbunden: %s:%s", self.host, self.port)
                 return None
             try:
                 rr = await self.client.read_input_registers(address, count, slave=self.slave)
@@ -61,7 +58,6 @@ class ModbusDevice:
             except Exception as e:
                 _LOGGER.error("Fehler beim Lesen der Register %s: %s", address, e)
                 return None
-
 
 # ========================
 # Sensor Entity
