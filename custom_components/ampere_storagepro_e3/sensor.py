@@ -53,7 +53,7 @@ class ModbusDevice:
             if not self.client:
                 return None
             try:
-                rr = await self.client.read_input_registers(address, count, slave=self.slave)
+                rr = await self.client.read_input_registers(address, count, unit=self.slave)
                 return rr.registers if rr and rr.registers else None
             except Exception as e:
                 _LOGGER.error("Fehler beim Lesen der Register %s: %s", address, e)
