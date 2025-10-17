@@ -1,22 +1,18 @@
 import asyncio
 import logging
-
 from homeassistant.helpers.entity import SensorEntity
-from pymodbus.client import AsyncModbusTcpClient
+from pymodbus.client.async_tcp import AsyncModbusTcpClient
 
 _LOGGER = logging.getLogger(__name__)
-
 DOMAIN = "ampere_storagepro_e3"
 
-# ========================
-# Setup Entry
-# ========================
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up sensors for Ampere StoragePro E3 via Modbus TCP."""
-    _LOGGER.info("Ampere StoragePro E3: Setup Entry gestartet für %s:%s", host, port)
     host = entry.data.get("host")
     port = entry.data.get("port", 502)
     slave = entry.data.get("slave_id", 1)
+
+    _LOGGER.info("Ampere StoragePro E3: Setup Entry gestartet für %s:%s", host, port)
 
     device = ModbusDevice(host, port, slave)
 
@@ -31,29 +27,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         "sensors": sensors,
     }
 
-    try:
-        async_add_entities(sensors, update_before_add=True)
-        _LOGGER.info("Ampere StoragePro E3: Sensoren hinzugefügt: %s", [s._attr_name for s in sensors])
-        return True
-    except Exception as e:
-        _LOGGER.error("Fehler beim Hinzufügen der Sensoren: %s", e)
-        return False
+    async_add_entities(sensors, update_before_add=True)
+    _LOGGER.info("Ampere StoragePro E3: Sensoren hinzugefügt: %s", [s._attr_name for s in sensors])
 
-async def async_unload_entry(hass, entry):
-    """Unload sensors and cleanup."""
-    data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    if not data:
-        _LOGGER.warning("Config Entry %s wurde nie geladen.", entry.entry_id)
-        return True
-
-    device = data.get("device")
-    if device and device.client:
-        try:
-            await device.client.close()
-        except Exception as e:
-            _LOGGER.error("Fehler beim Schließen der Modbus-Verbindung: %s", e)
-
-    return True
 
 # ========================
 # Modbus Device
@@ -67,25 +43,17 @@ class ModbusDevice:
         self.lock = asyncio.Lock()
 
     async def connect(self):
-        """Create a Modbus TCP connection if not connected."""
+        """Create Modbus TCP connection if not connected."""
         if not self.client:
-            try:
-                self.client = AsyncModbusTcpClient(self.host, port=self.port)
-                await asyncio.sleep(0.1)  # Delay, um Verbindung aufzubauen
-            except Exception as e:
-                _LOGGER.error(
-                    "Fehler beim Verbinden mit Modbus-Gerät %s:%s - %s",
-                    self.host,
-                    self.port,
-                    e,
-                )
-                self.client = None
+            self.client = AsyncModbusTcpClient(self.host, port=self.port)
+            await asyncio.sleep(0.1)
 
     async def read_registers(self, address, count):
         """Read Modbus input registers safely."""
         async with self.lock:
             await self.connect()
             if not self.client:
+                _LOGGER.error("Modbus Client nicht verbunden: %s:%s", self.host, self.port)
                 return None
             try:
                 rr = await self.client.read_input_registers(address, count, slave=self.slave)
@@ -93,6 +61,7 @@ class ModbusDevice:
             except Exception as e:
                 _LOGGER.error("Fehler beim Lesen der Register %s: %s", address, e)
                 return None
+
 
 # ========================
 # Sensor Entity
