@@ -119,6 +119,21 @@ async def async_setup_entry(hass, entry, async_add_entities):
         ModbusSensor(hass, device, "FoxESS Today Total Charging Capacity", 39607, 2, 0.01, "kWh", update_interval, data_type="uint32"),
         ModbusSensor(hass, device, "FoxESS PV Power Total", 39601, 2, 0.01, "kWh", update_interval, data_type="uint32"),
         ModbusSensor(hass, device, "FoxESS PV Power Today", 39603, 2, 0.01, "kWh", update_interval, data_type="uint32"),
+        ModbusSensor(hass, device,
+            "FoxESS Total Charging Capacity", 39605, 2, 0.01,
+            "kWh",
+            update_interval,
+            data_type="uint32"),
+        ModbusSensor(hass, device,
+            "FoxESS Charge Discharge Power", 39612, 2, 0.01,
+            "kWh",
+            update_interval,
+            data_type="uint32"),
+        ModbusSensor(hass, device,
+            "FoxESS BMS1 SoC", 39612, 1, 0.01,
+            "%",
+            update_interval,
+            data_type="uint16"),
     ]
 
     async_add_entities(sensors)
