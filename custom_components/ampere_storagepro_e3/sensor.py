@@ -130,7 +130,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             update_interval,
             data_type="uint32"),
         ModbusSensor(hass, device,
-            "FoxESS BMS1 SoC", 39612, 1, 1,
+            "FoxESS BMS1 SoC", 37612, 1, 1,
             "%",
             update_interval,
             data_type="uint16"),
