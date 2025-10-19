@@ -1,12 +1,13 @@
 {
   "domain": "ampere_storagepro_e3",
   "name": "Ampere StoragePro E3",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "config_flow": true,
   "documentation": "https://github.com/Sven0111/Ampere-StoragePro-E3",
   "requirements": ["pymodbus>=3.6.8"],
   "dependencies": [],
   "codeowners": ["@Sven0111"],
   "iot_class": "local_polling",
-  "platforms": ["sensor"]
+  "platforms": ["sensor"],
+  "options": true
 }
