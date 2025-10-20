@@ -21,7 +21,7 @@ class AmpereStorageProE3ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema({
             vol.Required("host", default="127.0.0.1"): str,
-            vol.Required("port", default=1502): int,
+            vol.Required("port", default=502): int,
             vol.Required("slave_id", default=247): int,
         })
         return self.async_show_form(step_id="user", data_schema=schema)
