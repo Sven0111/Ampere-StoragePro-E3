@@ -8,53 +8,30 @@ from pymodbus.client import AsyncModbusTcpClient
 _LOGGER = logging.getLogger(__name__)
 DOMAIN = "ampere_storagepro_e3"
 
-
 # ------------------------------------------------------------
-# Sichere Modbus-Lesung mit automatischer Verbindung + Fallback
+# Safe Modbus block read
 # ------------------------------------------------------------
-async def safe_read(host, port, slave, address, count, timeout=5):
-    """Liest Modbus-Register sicher mit Kompatibilität zu verschiedenen pymodbus-Versionen."""
-    client = AsyncModbusTcpClient(host, port=port, timeout=timeout)
+async def safe_read_block(host, port, slave, start_address, count, timeout=5):
+    """Read Modbus registers safely as a block."""
     try:
-        await client.connect()
-        if not client.connected:
-            _LOGGER.error("Keine Verbindung zu %s:%s", host, port)
-            return None
-
-        # Erster Versuch: device_id (ältere pymodbus-Versionen)
-        try:
-            rr = await asyncio.wait_for(
-                client.read_input_registers(address, count=count, device_id=slave),
-                timeout=timeout + 2,
+        async with AsyncModbusTcpClient(host=host, port=port) as client:
+            rr = await client.read_input_registers(
+                address=start_address, count=count, device_id=slave
             )
-        except TypeError:
-            # Fallback: unit (neuere pymodbus-Versionen)
-            rr = await asyncio.wait_for(
-                client.read_input_registers(address, count=count, unit=slave),
-                timeout=timeout + 2,
-            )
-
-        if rr is None or rr.isError():
-            _LOGGER.warning("Fehlerhafte Modbus-Antwort bei Adresse %s", address)
-            return None
-
-        return rr.registers
-
-    except asyncio.TimeoutError:
-        _LOGGER.error("Timeout beim Lesen von %s", address)
-        return None
+            if rr is None or rr.isError():
+                _LOGGER.warning("Failed Modbus read for block %s-%s", start_address, start_address + count - 1)
+                return None
+            _LOGGER.info("Successfully read block %s-%s", start_address, start_address + count - 1)
+            return rr.registers
     except Exception as e:
-        _LOGGER.error("Fehler bei Modbus-Lesung %s: %s", address, e)
+        _LOGGER.error("Error reading block %s-%s: %s", start_address, start_address + count - 1, e)
         return None
-    finally:
-        await client.close()
-
 
 # ------------------------------------------------------------
-# Sensor-Definition
+# Sensor definition
 # ------------------------------------------------------------
 class ModbusSensor(SensorEntity):
-    """Ein sicherer Modbus Sensor mit automatischer Wiederverbindung."""
+    """A safe Modbus sensor with automatic updates."""
 
     _attr_should_poll = False
 
@@ -73,79 +50,75 @@ class ModbusSensor(SensorEntity):
         self._interval = interval
         self._unsub_timer = None
         self.data_type = data_type.lower()
-        self._fail_count = 0  # Zählt aufeinanderfolgende Fehler
+        self._fail_count = 0
+
+    def update_value(self, raw_value):
+        """Convert raw value to scaled value based on data_type."""
+        if raw_value is None:
+            self._available = False
+            self._fail_count += 1
+            if self._fail_count % 5 == 0:
+                _LOGGER.warning("%s: No data received (%d consecutive failures)", self._attr_name, self._fail_count)
+            return
+
+        if self.data_type == "int32" and raw_value >= 0x80000000:
+            raw_value -= 0x100000000
+        elif self.data_type == "int16" and raw_value >= 0x8000:
+            raw_value -= 0x10000
+
+        self._attr_native_value = round(raw_value * self.scale, 2)
+        self._available = True
+        self._fail_count = 0
+        _LOGGER.info("%s updated: %s %s", self._attr_name, self._attr_native_value, self._attr_native_unit_of_measurement)
 
     async def async_added_to_hass(self):
-        """Starte periodische Updates."""
-        _LOGGER.info("%s: Starte Updates alle %ss", self._attr_name, self._interval)
-        self._unsub_timer = async_track_time_interval(
-            self.hass, self.async_update_wrapper, timedelta(seconds=self._interval)
-        )
-
-    async def async_will_remove_from_hass(self):
-        """Stoppe Timer beim Entfernen."""
-        if self._unsub_timer:
-            self._unsub_timer()
-            self._unsub_timer = None
-
-    async def async_update_wrapper(self, now):
-        """Wrapper mit Fehlerbehandlung."""
-        try:
-            await self.async_update()
-        except Exception as e:
-            _LOGGER.error("%s: Fehler beim Update: %s", self._attr_name, e)
-
-    async def async_update(self):
-        """Haupt-Update-Funktion."""
-        regs = await safe_read(self.host, self.port, self.slave, self.address, self.count)
-        if regs:
-            # Register in 16-Bit-Schritten zu 32-Bit zusammenfügen
-            raw_value = 0
-            for reg in regs:
-                raw_value = (raw_value << 16) + reg
-
-            # Datentyp korrekt interpretieren
-            if self.data_type == "int32" and raw_value >= 0x80000000:
-                raw_value -= 0x100000000
-            elif self.data_type == "int16" and raw_value >= 0x8000:
-                raw_value -= 0x10000
-
-            self._attr_native_value = round(raw_value * self.scale, 2)
-            self._available = True
-            self._fail_count = 0
-            self.async_write_ha_state()
-            _LOGGER.debug(
-                "Sensor %s aktualisiert: %s %s",
-                self._attr_name,
-                self._attr_native_value,
-                self._attr_native_unit_of_measurement,
-            )
-        else:
-            self._fail_count += 1
-            self._available = False
-            if self._fail_count % 5 == 0:  # Nur alle 5 Fehlschläge warnen
-                _LOGGER.warning("Sensor %s: Keine Daten empfangen (%d Fehler in Folge)", self._attr_name, self._fail_count)
-
+        """Start periodic updates."""
+        _LOGGER.info("%s: Starting updates every %ss", self._attr_name, self._interval)
 
 # ------------------------------------------------------------
-# Setup der Sensoren
+# Sensor setup and batch read
 # ------------------------------------------------------------
+SENSOR_DEFINITIONS = [
+    # name, start_address, count, scale, unit, data_type
+    ("FoxESS Today Total Charging Capacity", 39607, 2, 0.01, "kWh", "uint32"),
+    ("FoxESS PV Power Total", 39601, 2, 0.01, "kWh", "uint32"),
+    ("FoxESS PV Power Today", 39603, 2, 0.01, "kWh", "uint32"),
+    ("FoxESS Total Charging Capacity", 39605, 2, 0.01, "kWh", "uint32"),
+    ("FoxESS Charge Discharge Power", 39612, 2, 0.1, "W", "uint32"),
+    ("FoxESS BMS1 SoC", 37612, 1, 1, "%", "uint16"),
+]
+
 async def async_setup_entry(hass, entry, async_add_entities):
-    """Initialisiert Sensoren für die Integration."""
+    """Initialize sensors and start batch updates."""
     host = entry.data.get("host", "127.0.0.1")
     port = entry.data.get("port", 502)
     slave = entry.data.get("slave_id", 247)
     update_interval = entry.options.get("update_interval", 30)
-    _LOGGER.info("Ampere StoragePro E3: Update-Intervall = %ss", update_interval)
 
     sensors = [
-        ModbusSensor(hass, host, port, slave, "FoxESS Today Total Charging Capacity", 39607, 2, 0.01, "kWh", update_interval, "uint32"),
-        ModbusSensor(hass, host, port, slave, "FoxESS PV Power Total", 39601, 2, 0.01, "kWh", update_interval, "uint32"),
-        ModbusSensor(hass, host, port, slave, "FoxESS PV Power Today", 39603, 2, 0.01, "kWh", update_interval, "uint32"),
-        ModbusSensor(hass, host, port, slave, "FoxESS Total Charging Capacity", 39605, 2, 0.01, "kWh", update_interval, "uint32"),
-        ModbusSensor(hass, host, port, slave, "FoxESS Charge Discharge Power", 39612, 2, 0.1, "W", update_interval, "uint32"),
-        ModbusSensor(hass, host, port, slave, "FoxESS BMS1 SoC", 37612, 1, 1, "%", update_interval, "uint16"),
+        ModbusSensor(hass, host, port, slave, *s)
+        for s in SENSOR_DEFINITIONS
     ]
 
     async_add_entities(sensors)
-    _LOGGER.info("Ampere StoragePro E3: Sensoren erfolgreich registriert.")
+    _LOGGER.info("Ampere StoragePro E3: Sensors successfully registered")
+
+    async def batch_update(now):
+        asyncio.create_task(do_batch_read())
+
+    async def do_batch_read():
+        """Read all blocks and update sensors."""
+        for name, addr, count, scale, unit, dtype in SENSOR_DEFINITIONS:
+            regs = await safe_read_block(host, port, slave, addr, count)
+            if regs:
+                # Combine 16-bit registers to one value
+                value = 0
+                for reg in regs:
+                    value = (value << 16) + reg
+                # Update the sensor
+                for sensor in sensors:
+                    if sensor._attr_name == name:
+                        sensor.update_value(value)
+                        sensor.async_write_ha_state()
+
+    async_track_time_interval(hass, batch_update, timedelta(seconds=update_interval))
