@@ -8,53 +8,52 @@ from pymodbus.client import AsyncModbusTcpClient
 _LOGGER = logging.getLogger(__name__)
 DOMAIN = "ampere_storagepro_e3"
 
-class ModbusDevice:
-    """Represents a Modbus TCP device connection."""
-
-    def __init__(self, host: str, port: int, slave: int):
-        self.host = host
-        self.port = port
-        self.slave = slave
-        self.client: AsyncModbusTcpClient | None = None
-        self._is_connecting = False
-        self._lock = asyncio.Lock()
-
-    async def connect(self):
-        """Ensure connection is established before any read."""
-        async with self._lock:
-            if self.client and self.client.connected:
-                return  # schon verbunden
-            _LOGGER.info("Connecting to Modbus device at %s:%s...", self.host, self.port)
-            self.client = AsyncModbusTcpClient(self.host, port=self.port)
-            await self.client.connect()
-            if not self.client.connected:
-                _LOGGER.error("Modbus client could not connect to %s:%s", self.host, self.port)
-
-    async def read_registers(self, address: int, count: int):
-        """Read input registers safely."""
-        try:
-            await self.connect()
-            if not self.client or not self.client.connected:
-                _LOGGER.error("Modbus client not connected when trying to read address %s", address)
-                return None
-
-            rr = await self.client.read_input_registers(address, count=count, device_id=self.slave)
-            if rr is None or rr.isError():
-                _LOGGER.warning("Invalid or no Modbus response at address %s", address)
-                return None
-            return rr.registers
-        except Exception as e:
-            _LOGGER.error("Error reading Modbus registers at address %s: %s", address, e)
+# ------------------------------------------------------------
+# Hilfsfunktion: Sichere Modbus-Lesung mit automatischer Verbindung
+# ------------------------------------------------------------
+async def safe_read(host, port, slave, address, count, timeout=5):
+    """Liest Modbus-Register mit neuer Verbindung für jede Anfrage."""
+    client = AsyncModbusTcpClient(host, port=port, timeout=timeout)
+    try:
+        await client.connect()
+        if not client.connected:
+            _LOGGER.error("Verbindung zu %s:%s fehlgeschlagen", host, port)
             return None
 
+        rr = await asyncio.wait_for(
+            client.read_input_registers(address, count=count, device_id=slave),
+            timeout=timeout + 2,
+        )
+
+        if rr.isError() or rr is None:
+            _LOGGER.warning("Fehlerhafte Modbus-Antwort bei Adresse %s", address)
+            return None
+
+        return rr.registers
+
+    except asyncio.TimeoutError:
+        _LOGGER.error("Timeout beim Lesen von %s", address)
+        return None
+    except Exception as e:
+        _LOGGER.error("Exception beim Lesen von %s: %s", address, e)
+        return None
+    finally:
+        await client.close()
+
+
+# ------------------------------------------------------------
+# Sensor-Definition
+# ------------------------------------------------------------
 class ModbusSensor(SensorEntity):
-    """Modbus sensor supporting int16/uint16/int32/uint32."""
+    """Modbus Sensor mit automatischer Verbindung."""
 
     _attr_should_poll = False
 
-    def __init__(self, hass, device: ModbusDevice, name: str, address: int, count: int, scale: float, unit: str, interval: int, data_type="uint16"):
+    def __init__(self, hass, host, port, slave, name, address, count, scale, unit, interval, data_type="uint16"):
         self.hass = hass
-        self.device = device
+        self.host = host
+        self.port = port
+        self.slave = slave
         self._attr_name = name
         self.address = address
         self.count = count
@@ -67,8 +66,7 @@ class ModbusSensor(SensorEntity):
         self.data_type = data_type.lower()
 
     async def async_added_to_hass(self):
-        """Start polling with interval."""
-        _LOGGER.info("%s: Starting updates every %s seconds", self._attr_name, self._interval)
+        _LOGGER.info("%s: Starte Updates alle %ss", self._attr_name, self._interval)
         self._unsub_timer = async_track_time_interval(
             self.hass, self.async_update_wrapper, timedelta(seconds=self._interval)
         )
@@ -82,16 +80,16 @@ class ModbusSensor(SensorEntity):
         try:
             await self.async_update()
         except Exception as e:
-            _LOGGER.error("%s: Exception in update: %s", self._attr_name, e)
+            _LOGGER.error("%s: Fehler beim Update: %s", self._attr_name, e)
 
     async def async_update(self):
-        regs = await self.device.read_registers(self.address, self.count)
+        regs = await safe_read(self.host, self.port, self.slave, self.address, self.count)
         if regs:
             raw_value = 0
             for reg in regs:
                 raw_value = (raw_value << 16) + reg
 
-            # int/uint conversion
+            # Datentyp anpassen
             if self.data_type == "int32" and raw_value >= 0x80000000:
                 raw_value -= 0x100000000
             elif self.data_type == "int16" and raw_value >= 0x8000:
@@ -99,42 +97,32 @@ class ModbusSensor(SensorEntity):
 
             self._attr_native_value = round(raw_value * self.scale, 2)
             self._available = True
-            _LOGGER.debug("Sensor %s updated: %s %s", self._attr_name, self._attr_native_value, self._attr_native_unit_of_measurement)
             self.async_write_ha_state()
+            _LOGGER.debug("Sensor %s aktualisiert: %s %s", self._attr_name, self._attr_native_value, self._attr_native_unit_of_measurement)
         else:
-            _LOGGER.warning("Sensor %s: No data received", self._attr_name)
+            _LOGGER.warning("Sensor %s: Keine Daten empfangen", self._attr_name)
             self._available = False
 
+
+# ------------------------------------------------------------
+# Setup: Alle Sensoren als Batch lesen (optional)
+# ------------------------------------------------------------
 async def async_setup_entry(hass, entry, async_add_entities):
     host = entry.data.get("host", "127.0.0.1")
     port = entry.data.get("port", 1502)
     slave = entry.data.get("slave_id", 247)
     update_interval = entry.options.get("update_interval", 30)
-    _LOGGER.info("Ampere StoragePro E3: Update interval set to %ss", update_interval)
+    _LOGGER.info("Ampere StoragePro E3: Update-Intervall = %ss", update_interval)
 
-    device = ModbusDevice(host, port, slave)
-    await device.connect()  # Verbindungsaufbau vor Registrierung der Sensoren
-
+    # Sensorliste: gleiche Bereiche gruppieren (Batch)
     sensors = [
-        ModbusSensor(hass, device, "FoxESS Today Total Charging Capacity", 39607, 2, 0.01, "kWh", update_interval, data_type="uint32"),
-        ModbusSensor(hass, device, "FoxESS PV Power Total", 39601, 2, 0.01, "kWh", update_interval, data_type="uint32"),
-        ModbusSensor(hass, device, "FoxESS PV Power Today", 39603, 2, 0.01, "kWh", update_interval, data_type="uint32"),
-        ModbusSensor(hass, device,
-            "FoxESS Total Charging Capacity", 39605, 2, 0.01,
-            "kWh",
-            update_interval,
-            data_type="uint32"),
-        ModbusSensor(hass, device,
-            "FoxESS Charge Discharge Power", 39612, 2, 0.1,
-            "W",
-            update_interval,
-            data_type="uint32"),
-        ModbusSensor(hass, device,
-            "FoxESS BMS1 SoC", 37612, 1, 1,
-            "%",
-            update_interval,
-            data_type="uint16"),
+        ModbusSensor(hass, host, port, slave, "FoxESS Today Total Charging Capacity", 39607, 2, 0.01, "kWh", update_interval, "uint32"),
+        ModbusSensor(hass, host, port, slave, "FoxESS PV Power Total", 39601, 2, 0.01, "kWh", update_interval, "uint32"),
+        ModbusSensor(hass, host, port, slave, "FoxESS PV Power Today", 39603, 2, 0.01, "kWh", update_interval, "uint32"),
+        ModbusSensor(hass, host, port, slave, "FoxESS Total Charging Capacity", 39605, 2, 0.01, "kWh", update_interval, "uint32"),
+        ModbusSensor(hass, host, port, slave, "FoxESS Charge Discharge Power", 39612, 2, 0.1, "W", update_interval, "uint32"),
+        ModbusSensor(hass, host, port, slave, "FoxESS BMS1 SoC", 37612, 1, 1, "%", update_interval, "uint16"),
     ]
 
     async_add_entities(sensors)
-    _LOGGER.info("Ampere StoragePro E3: Sensors registered successfully.")
+    _LOGGER.info("Ampere StoragePro E3: Sensoren erfolgreich registriert.")
