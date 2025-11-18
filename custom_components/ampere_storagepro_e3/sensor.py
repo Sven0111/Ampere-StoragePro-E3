@@ -184,19 +184,25 @@ class ModbusSensor(BaseModbusSensor):
             self._fail_count += 1
             return
         try:
-            raw_value = 0
-            for reg in regs:
-                raw_value = (raw_value << 16) + reg
+            if self.data_type == "str":
+                # Alle Register zu Bytes zusammenfügen
+                raw_bytes = b"".join(reg.to_bytes(2, "big") for reg in regs)
+                self._attr_native_value = raw_bytes.decode("ascii", errors="ignore").strip("\x00").strip()
+            else:
+                raw_value = 0
+                for reg in regs:
+                    raw_value = (raw_value << 16) + reg
     
-            # Vorzeichenbehandlung
-            if self.data_type == "int16":
-                raw_value = (raw_value + 2**15) % 2**16 - 2**15
-            elif self.data_type == "int32":
-                raw_value = (raw_value + 2**31) % 2**32 - 2**31
+                # Vorzeichenbehandlung
+                if self.data_type == "int16":
+                    raw_value = (raw_value + 2**15) % 2**16 - 2**15
+                elif self.data_type == "int32":
+                    raw_value = (raw_value + 2**31) % 2**32 - 2**31
     
-            self._attr_native_value = round(raw_value * self.scale, 2)
+                self._attr_native_value = round(raw_value * self.scale, 2)
         except Exception as e:
             _LOGGER.error("%s decode failed: %s", self._attr_name, e)
+
 
 
 
