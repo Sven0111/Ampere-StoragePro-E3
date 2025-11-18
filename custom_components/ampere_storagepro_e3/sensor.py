@@ -187,9 +187,17 @@ class ModbusSensor(BaseModbusSensor):
             raw_value = 0
             for reg in regs:
                 raw_value = (raw_value << 16) + reg
+    
+            # Vorzeichenbehandlung
+            if self.data_type == "int16":
+                raw_value = (raw_value + 2**15) % 2**16 - 2**15
+            elif self.data_type == "int32":
+                raw_value = (raw_value + 2**31) % 2**32 - 2**31
+    
             self._attr_native_value = round(raw_value * self.scale, 2)
         except Exception as e:
             _LOGGER.error("%s decode failed: %s", self._attr_name, e)
+
 
 
 # --------------------- String Sensoren ---------------------
