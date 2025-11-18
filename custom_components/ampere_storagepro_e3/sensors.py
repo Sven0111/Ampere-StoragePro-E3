@@ -1,7 +1,7 @@
 from homeassistant.components.sensor import SensorDeviceClass
 
 # Numerische Sensoren (alle ohne Diagnostic)
-sensor_definitions = [
+SENSOR_DEFINITIONS  = [
     # Versionsnummern
     ("Master Version", 36001, 1, 1, "", "uint16", None, None, True),
     ("Slave Version", 36002, 1, 1, "", "uint16", None, None, True),
