@@ -1,175 +1,248 @@
-import logging
 import asyncio
+import logging
 from datetime import timedelta
-from homeassistant.components.sensor import SensorEntity
+from contextlib import suppress
+
+from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.entity import EntityCategory
 from pymodbus.client import AsyncModbusTcpClient
+from .const import DOMAIN
+from .sensors import SENSOR_DEFINITIONS  # <-- Sensor-Definitionen importieren
 
 _LOGGER = logging.getLogger(__name__)
-DOMAIN = "ampere_storagepro_e3"
+_LOCK = asyncio.Lock()
 
-# ------------------------------------------------------------
-# Safe Modbus block read
-# ------------------------------------------------------------
-async def safe_read_block(host, port, slave, start_address, count, timeout=5):
-    """Read Modbus registers safely as a block."""
-    try:
-        async with AsyncModbusTcpClient(host=host, port=port) as client:
-            rr = await client.read_input_registers(
-                address=start_address, count=count, device_id=slave
+
+async def async_setup_entry(hass, entry, async_add_entities):
+    host = entry.data["host"]
+    port = entry.data["port"]
+    slave = entry.data["slave_id"]
+    update_interval = entry.options.get("update_interval", 30)
+    enable_diag = entry.options.get("enable_diagnostics", True)
+
+    # -----------------------------------------------------------
+    # 1. Device-Info VOR dem Erstellen der Sensoren auslesen
+    # -----------------------------------------------------------
+    async with AsyncModbusTcpClient(host=host, port=port) as client:
+        if client.connected:
+            # Model
+            regs = await safe_read_block(client, slave, 30000, 16)
+            model = None
+            if regs:
+                model = b"".join(reg.to_bytes(2, "big") for reg in regs).decode("ascii", errors="ignore").strip("\x00").strip()
+
+            # Serial
+            regs = await safe_read_block(client, slave, 30016, 16)
+            serial = None
+            if regs:
+                serial = b"".join(reg.to_bytes(2, "big") for reg in regs).decode("ascii", errors="ignore").strip("\x00").strip()
+
+            # Manufacturer
+            regs = await safe_read_block(client, slave, 30032, 16)
+            manufacturer = None
+            if regs:
+                manufacturer = b"".join(reg.to_bytes(2, "big") for reg in regs).decode("ascii", errors="ignore").strip("\x00").strip()
+
+            BaseModbusSensor._device_info_data = {
+                "model": model or "FoxESS",
+                "serial": serial or "N/A",
+                "manufacturer": manufacturer or "Ampere",
+            }
+
+            _LOGGER.warning("Device Info loaded BEFORE sensor creation: %s", BaseModbusSensor._device_info_data)
+        else:
+            _LOGGER.error("Could not connect to Modbus device for initial device info read.")
+
+    # -----------------------------------------------------------
+    # 2. Init-Sensoren wie bisher anlegen (Device-Info schon gelesen)
+    # -----------------------------------------------------------
+    init_sensors = [
+        ModbusInitSensor(hass, entry, host, port, slave, "FoxESS Model Name", 30000, 16),
+        ModbusInitSensor(hass, entry, host, port, slave, "FoxESS Serial Number", 30016, 16),
+        ModbusInitSensor(hass, entry, host, port, slave, "FoxESS Manufacturer ID", 30032, 16),
+    ]
+
+    async_add_entities(init_sensors, update_before_add=True)
+    for sensor in init_sensors:
+        hass.async_create_task(sensor.async_initialize())
+
+    # -----------------------------------------------------------
+    # 3. Alle anderen Sensoren aus sensors.py anlegen
+    # -----------------------------------------------------------
+    string_sensors = []
+
+    sensors = string_sensors.copy()
+    for name, addr, count, scale, unit, dtype, cat, device_class, enabled in SENSOR_DEFINITIONS:
+        # Nur aktivierte Sensoren hinzufügen
+        if not enabled:
+            continue
+        if not enable_diag and cat == EntityCategory.DIAGNOSTIC:
+            continue
+
+        sensors.append(
+            ModbusSensor(
+                hass,
+                entry,
+                host,
+                port,
+                slave,
+                name,
+                addr,
+                count,
+                scale,
+                unit,
+                update_interval,
+                dtype,
+                category=cat,
+                device_class=device_class,
+                enabled=enabled,
             )
-            if rr is None or rr.isError():
-                _LOGGER.warning("Failed Modbus read for block %s-%s", start_address, start_address + count - 1)
-                return None
-            return rr.registers
-    except Exception as e:
-        _LOGGER.error("Error reading block %s-%s: %s", start_address, start_address + count - 1, e)
+        )
+
+    async_add_entities(sensors, update_before_add=True)
+    _LOGGER.info("Ampere StoragePro E3: %s sensors registered", len(sensors))
+
+    # Intervall-Update
+    async def batch_update(_now):
+        hass.async_create_task(do_batch_read(host, port, slave, sensors))
+
+    async_track_time_interval(hass, batch_update, timedelta(seconds=update_interval))
+
+
+# --------------------- Helferfunktionen ---------------------
+async def safe_read_block(client, slave, start_address, count, timeout=5):
+    try:
+        rr = await asyncio.wait_for(
+            client.read_input_registers(address=start_address, count=count, device_id=slave),
+            timeout=timeout,
+        )
+        if rr.isError():
+            return None
+        return rr.registers
+    except Exception:
         return None
 
 
-# ------------------------------------------------------------
-# Modbus Sensor (für Zahlen)
-# ------------------------------------------------------------
-class ModbusSensor(SensorEntity):
-    """Numeric Modbus sensor with auto updates."""
-
-    _attr_should_poll = False
-
-    def __init__(self, hass, host, port, slave, name, address, count, scale, unit, interval, data_type="uint16"):
-        self.hass = hass
-        self.host = host
-        self.port = port
-        self.slave = slave
-        self._attr_name = name
-        self.address = address
-        self.count = count
-        self.scale = scale
-        self._attr_native_unit_of_measurement = unit
-        self._attr_native_value = None
-        self._available = True
-        self._interval = interval
-        self._unsub_timer = None
-        self.data_type = data_type.lower()
-        self._fail_count = 0
-
-    def update_value(self, regs):
-        """Convert raw registers to value."""
-        if regs is None:
-            self._available = False
-            self._fail_count += 1
-            if self._fail_count % 5 == 0:
-                _LOGGER.warning("%s: No data (%d consecutive fails)", self._attr_name, self._fail_count)
-            return
-
-        raw_value = 0
-        for reg in regs:
-            raw_value = (raw_value << 16) + reg
-
-        # Datentyp anpassen
-        if self.data_type == "int32" and raw_value >= 0x80000000:
-            raw_value -= 0x100000000
-        elif self.data_type == "int16" and raw_value >= 0x8000:
-            raw_value -= 0x10000
-
-        self._attr_native_value = round(raw_value * self.scale, 2)
-        self._available = True
-        self._fail_count = 0
-        _LOGGER.debug("%s updated: %s %s", self._attr_name, self._attr_native_value, self._attr_native_unit_of_measurement)
-
-
-# ------------------------------------------------------------
-# Modbus String Sensor (für Model Name)
-# ------------------------------------------------------------
-class ModbusStringSensor(SensorEntity):
-    """Reads ASCII strings from Modbus registers."""
-
-    _attr_should_poll = False
-
-    def __init__(self, hass, host, port, slave, name, address, count, interval):
-        self.hass = hass
-        self.host = host
-        self.port = port
-        self.slave = slave
-        self._attr_name = name
-        self.address = address
-        self.count = count
-        self._attr_native_value = None
-        self._available = True
-        self._interval = interval
-        self._fail_count = 0
-
-    def update_value(self, regs):
-        """Decode Modbus registers as ASCII string."""
-        if regs is None:
-            self._fail_count += 1
-            if self._fail_count % 5 == 0:
-                _LOGGER.warning("%s: No string data (%d consecutive fails)", self._attr_name, self._fail_count)
-            return
-
+async def do_batch_read(host, port, slave, sensors):
+    if _LOCK.locked():
+        return
+    async with _LOCK:
         try:
-            raw_bytes = b''.join(reg.to_bytes(2, 'big') for reg in regs)
-            text = raw_bytes.decode('ascii', errors='ignore').strip('\x00').strip()
-            self._attr_native_value = text
-            self._available = True
-            self._fail_count = 0
-            _LOGGER.info("%s updated: %s", self._attr_name, text)
+            async with AsyncModbusTcpClient(host=host, port=port) as client:
+                if not client.connected:
+                    return
+                for sensor in sensors:
+                    with suppress(Exception):
+                        regs = await safe_read_block(client, slave, sensor.address, sensor.count)
+                        sensor.update_value(regs)
+                        sensor.async_write_ha_state()
         except Exception as e:
-            _LOGGER.error("%s: String decode error: %s", self._attr_name, e)
-            self._available = False
+            _LOGGER.error("Unexpected Modbus error: %s", e)
 
 
-# ------------------------------------------------------------
-# Sensor definitions
-# ------------------------------------------------------------
-SENSOR_DEFINITIONS = [
-    # (name, start_address, count, scale, unit, data_type)
-    ("FoxESS BMS1 SoC", 37612, 1, 1, "%", "uint16"),
-    ("FoxESS PV Power Total", 39601, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS PV Power Today", 39603, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Total Charging Capacity", 39605, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Todays Total Charging Capacity", 39607, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Total Discharge Power", 39609, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Todays Total Discharge Power", 39611, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Total Power of Feeder Network", 39613, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Todays Total Feeder Power", 39615, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Total Power Taken", 39617, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Todays Total Electricity Consumption", 39619, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Output Total Power", 39621, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Total Power Output Today", 39623, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Enter Total Power", 39625, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Enter Total Power Today", 39627, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Total Load Power", 39629, 2, 0.01, "kWh", "uint32"),
-    ("FoxESS Total Load Power Today", 39631, 2, 0.01, "kWh", "uint32"),
-]
+# --------------------- Basis-Klasse ---------------------
+class BaseModbusSensor(SensorEntity):
+    _attr_should_poll = False
+    _device_info_data = {"model": None, "serial": None, "manufacturer": None}
 
-# ------------------------------------------------------------
-# Setup
-# ------------------------------------------------------------
-async def async_setup_entry(hass, entry, async_add_entities):
-    host = entry.data.get("host", "127.0.0.1")
-    port = entry.data.get("port", 502)
-    slave = entry.data.get("slave_id", 247)
-    update_interval = entry.options.get("update_interval", 30)
+    def __init__(self, hass, entry, host, port, slave, name, address, count, interval):
+        self.hass = hass
+        self.entry = entry
+        self.host = host
+        self.port = port
+        self.slave = slave
+        self._attr_name = name
+        self.address = address
+        self.count = count
+        self._interval = interval
+        self._attr_unique_id = f"{self.host}_{self.port}_{self.slave}_{name.replace(' ', '_')}"
 
-    sensors = [
-        ModbusStringSensor(hass, host, port, slave, "FoxESS Model Name", 30000, 16, update_interval),
-        *[
-            ModbusSensor(hass, host, port, slave, name, addr, count, scale, unit, update_interval, dtype)
-            for name, addr, count, scale, unit, dtype in SENSOR_DEFINITIONS
-        ],
-    ]
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, f"{self.host}_{self.port}_{self.slave}")},
+            "name": "Ampere StoragePro E3",
+            "manufacturer": self._device_info_data.get("manufacturer") or "Ampere",
+            "model": self._device_info_data.get("model") or "FoxESS",
+            "sw_version": self._device_info_data.get("serial") or "N/A",
+        }
 
-    async_add_entities(sensors)
-    _LOGGER.info("Ampere StoragePro E3: %s sensors registered", len(sensors))
 
-    async def batch_update(now):
-        asyncio.create_task(do_batch_read())
+# --------------------- Modbus Sensor ---------------------
+class ModbusSensor(BaseModbusSensor):
+    def __init__(self, hass, entry, host, port, slave, name, address, count, scale, unit, interval, data_type, category=None, device_class=None, enabled=True):
+        super().__init__(hass, entry, host, port, slave, name, address, count, interval)
+        self.scale = scale
+        self.data_type = data_type
+        self._attr_native_unit_of_measurement = unit
+        self._attr_entity_category = category
+        self._attr_device_class = device_class
+        self._enabled = enabled
+        self._fail_count = 0
 
-    async def do_batch_read():
-        for sensor in sensors:
-            regs = await safe_read_block(sensor.host, sensor.port, sensor.slave, sensor.address, sensor.count)
-            if hasattr(sensor, "update_value"):
-                sensor.update_value(regs)
-                sensor.async_write_ha_state()
+    def update_value(self, regs):
+        if regs is None:
+            self._fail_count += 1
+            return
+        try:
+            raw_value = 0
+            for reg in regs:
+                raw_value = (raw_value << 16) + reg
+            self._attr_native_value = round(raw_value * self.scale, 2)
+        except Exception as e:
+            _LOGGER.error("%s decode failed: %s", self._attr_name, e)
 
-    async_track_time_interval(hass, batch_update, timedelta(seconds=update_interval))
+
+# --------------------- String Sensoren ---------------------
+class ModbusStringSensor(BaseModbusSensor):
+    def __init__(self, hass, entry, host, port, slave, name, address, count, interval):
+        super().__init__(hass, entry, host, port, slave, name, address, count, interval)
+
+    def update_value(self, regs):
+        if regs is None:
+            return
+        try:
+            raw_bytes = b"".join(reg.to_bytes(2, "big") for reg in regs)
+            self._attr_native_value = raw_bytes.decode("ascii", errors="ignore").strip("\x00").strip()
+        except Exception as e:
+            _LOGGER.error("%s string decode failed: %s", self._attr_name, e)
+
+
+# --------------------- Init Sensoren ---------------------
+class ModbusInitSensor(BaseModbusSensor):
+    """Sensor, der nur einmal beim Setup gelesen wird."""
+
+    def __init__(self, hass, entry, host, port, slave, name, address, count):
+        super().__init__(hass, entry, host, port, slave, name, address, count, interval=0)
+
+    async def async_initialize(self):
+        try:
+            async with AsyncModbusTcpClient(host=self.host, port=self.port) as client:
+                if client.connected:
+                    regs = await safe_read_block(client, self.slave, self.address, self.count)
+                    if regs:
+                        raw_bytes = b"".join(reg.to_bytes(2, "big") for reg in regs)
+                        value = raw_bytes.decode("ascii", errors="ignore").strip("\x00").strip()
+                        self._attr_native_value = value
+
+                        # Geräteinfo aktualisieren
+                        if self._attr_name == "FoxESS Model Name":
+                            BaseModbusSensor._device_info_data["model"] = value
+                        elif self._attr_name == "FoxESS Serial Number":
+                            BaseModbusSensor._device_info_data["serial"] = value
+                        elif self._attr_name == "FoxESS Manufacturer ID":
+                            BaseModbusSensor._device_info_data["manufacturer"] = value
+
+                        _LOGGER.warning("device_info updated: %s", BaseModbusSensor._device_info_data)
+
+                        info = BaseModbusSensor._device_info_data
+                        if info["model"] and info["serial"] and info["manufacturer"]:
+                            all_sensors = self.hass.data.setdefault(DOMAIN, {}).get("all_sensors", [])
+                            for sensor in all_sensors:
+                                sensor.async_schedule_update_ha_state(force_refresh=True)
+
+                        self.async_write_ha_state()
+
+        except Exception as e:
+            _LOGGER.error("%s initial read failed: %s", self._attr_name, e)
