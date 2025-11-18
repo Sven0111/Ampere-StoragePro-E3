@@ -32,7 +32,7 @@ SENSOR_DEFINITIONS = [
     ("Meter1 R Phase Active Power", 38816, 2, 0.1, "W", "int32", None, SensorDeviceClass.POWER, True),
     ("Meter1 S Phase Active Power", 38818, 2, 0.1, "W", "int32", None, SensorDeviceClass.POWER, True),
     ("Meter1 T Phase Active Power", 38820, 2, 0.1, "W", "int32", None, SensorDeviceClass.POWER, True),
-    ("Meter1 Combined Reactive Power", 38822, 2, 0.1, "W", "int32", None, SensorDeviceClass.POWER, True),
+    ("Meter1 Combined Reactive Power", 38822, 2, 0.1, "Var", "int32", None, SensorDeviceClass.POWER, True),
     ("Meter1 R Phase Reactive Power", 38824, 2, 0.1, "Var", "int32", None, SensorDeviceClass.POWER, True),
     ("Meter1 S Phase Reactive Power", 38826, 2, 0.1, "Var", "int32", None, SensorDeviceClass.POWER, True),
     ("Meter1 T Phase Reactive Power", 38828, 2, 0.1, "Var", "int32", None, SensorDeviceClass.POWER, True),
@@ -81,4 +81,7 @@ SENSOR_DEFINITIONS = [
     ("Enter Power Today", 39627, 2, 0.01, "kWh", "uint32", None, SensorDeviceClass.ENERGY, False),
     ("Total Load Power", 39629, 2, 0.01, "kWh", "uint32", None, SensorDeviceClass.ENERGY, True),
     ("Load Power Today", 39631, 2, 0.01, "kWh", "uint32", None, SensorDeviceClass.ENERGY, False),
+
+    # Grid Werte
+    ("Meter collection Actice Power", 39168, 2, 1, "W", "uint32", None, SensorDeviceClass.POWER, True),
 ]

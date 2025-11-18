@@ -74,9 +74,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     sensors = string_sensors.copy()
     for name, addr, count, scale, unit, dtype, cat, device_class, enabled in SENSOR_DEFINITIONS:
-        # Nur aktivierte Sensoren hinzufügen
-        if not enabled:
-            continue
+        
         if not enable_diag and cat == EntityCategory.DIAGNOSTIC:
             continue
 
@@ -178,7 +176,7 @@ class ModbusSensor(BaseModbusSensor):
         self._attr_native_unit_of_measurement = unit
         self._attr_entity_category = category
         self._attr_device_class = device_class
-        self._enabled = enabled
+        self._attr_entity_registry_enabled_default = enabled
         self._fail_count = 0
 
     def update_value(self, regs):
