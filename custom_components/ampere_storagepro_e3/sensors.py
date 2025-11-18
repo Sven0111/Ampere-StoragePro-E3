@@ -83,5 +83,5 @@ SENSOR_DEFINITIONS = [
     ("Load Power Today", 39631, 2, 0.01, "kWh", "uint32", None, SensorDeviceClass.ENERGY, False),
 
     # Grid Werte
-    ("Meter collection Actice Power", 39168, 2, 1, "W", "uint32", None, SensorDeviceClass.POWER, True),
+    ("Meter collection Actice Power", 39168, 2, 1, "W", "int32", None, SensorDeviceClass.POWER, True),
 ]
