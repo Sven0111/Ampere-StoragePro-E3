@@ -336,6 +336,11 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if regs:
                     data[f"ctrl_{addr}"] = regs[0]
 
+            # Key Password (49232, 8 Register, String) – separat wegen Stringtyp
+            regs = await self._read_holding(client, 49232, 8)
+            if regs is not None:
+                data["key_password"] = _decode_string(regs)
+
         return data
 
     # -- Aufräumen --------------------------------------------------------

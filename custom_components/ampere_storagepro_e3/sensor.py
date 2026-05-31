@@ -96,7 +96,8 @@ async def async_setup_entry(
 
         entities.append(AmpereModbusSensor(coordinator, entry, sd))
 
-    async_add_entities(entities)
+    extra: list[SensorEntity] = [AmpereKeyPasswordSensor(coordinator)]
+    async_add_entities(entities + extra)
 
 
 class AmpereModbusSensor(CoordinatorEntity[AmpereStorageProE3Coordinator], SensorEntity):
@@ -159,3 +160,30 @@ class AmpereModbusSensor(CoordinatorEntity[AmpereStorageProE3Coordinator], Senso
     @property
     def available(self) -> bool:
         return super().available and self._key in self.coordinator.data
+
+
+class AmpereKeyPasswordSensor(
+    CoordinatorEntity[AmpereStorageProE3Coordinator], SensorEntity
+):
+    """Diagnose: liest das 'Key Password'-Register (49232) als Klartext."""
+
+    _attr_name = "Key Password"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: AmpereStorageProE3Coordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{coordinator.host}_{coordinator.port}_{coordinator.slave}_key_password"
+        )
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return ampere_device_info(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        return super().available and "key_password" in self.coordinator.data
+
+    @property
+    def native_value(self) -> Any:
+        return self.coordinator.data.get("key_password")
