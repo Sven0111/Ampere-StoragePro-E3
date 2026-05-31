@@ -62,6 +62,31 @@ Nachträglich änderbar unter *Konfigurieren*:
 - **Aktualisierungsintervall**: 10 / 30 / 60 / 120 Sekunden
 - **Diagnose-Sensoren** aktivieren/deaktivieren
 
+## 🔗 Verbindung über Modbus Proxy (empfohlen)
+
+Der StoragePro E3 akzeptiert in der Regel nur **eine** gleichzeitige Modbus-TCP-Verbindung. Damit mehrere Dienste parallel zugreifen können und die Verbindung stabil bleibt, wird ein **Modbus Proxy** vorgeschaltet – die Integration verbindet sich dann mit dem Proxy statt direkt mit dem Gerät.
+
+Getestetes Setup mit dem Home-Assistant-Add-on **[Modbus Proxy](https://github.com/TCzerny/ha-modbusproxy)** (Version **2.2.7**): Der Proxy lauscht lokal auf **Port `502`** und leitet an den Wechselrichter weiter. In der Integration werden dann diese Werte eingetragen:
+
+| Feld | Wert |
+|------|------|
+| **Host** | `127.0.0.1` (bzw. die Adresse des Proxy-Hosts) |
+| **Port** | `502` |
+| **Slave-ID** | `247` |
+
+Beispiel-Konfiguration des Add-ons:
+
+```yaml
+modbus_devices:
+  - name: Solar Inverter 1
+    protocol: tcp
+    host: <IP-des-Wechselrichters>   # echte IP des StoragePro E3
+    port: 502
+    bind_port: 502                   # lokaler Port, mit dem sich HA verbindet
+    device: "247"                    # Modbus Slave-/Unit-ID
+    timeout: 4
+```
+
 ## 📈 Energie-Dashboard
 
 Für das HA-Energie-Dashboard eignen sich die nativen kumulativen Zähler:
