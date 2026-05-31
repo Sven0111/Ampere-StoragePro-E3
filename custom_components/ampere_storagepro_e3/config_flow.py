@@ -110,16 +110,13 @@ class AmpereStorageProE3ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return AmpereStorageProE3OptionsFlowHandler(config_entry)
+        return AmpereStorageProE3OptionsFlowHandler()
 
 
 # ------------------ Options Flow ------------------
 
 class AmpereStorageProE3OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry):
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
         options = self.config_entry.options
