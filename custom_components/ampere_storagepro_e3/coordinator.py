@@ -150,7 +150,11 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _ensure_connected(self) -> AsyncModbusTcpClient:
         """Stellt sicher, dass eine offene Verbindung existiert."""
         if self._client is None:
-            self._client = AsyncModbusTcpClient(host=self.host, port=self.port)
+            # Höheres Timeout, damit Schreibzugriffe auch über einen ausgelasteten
+            # Modbus-Proxy (mehrere Clients) zuverlässig eine Antwort erhalten.
+            self._client = AsyncModbusTcpClient(
+                host=self.host, port=self.port, timeout=10
+            )
         if not self._client.connected:
             await self._client.connect()
         if not self._client.connected:
@@ -230,12 +234,17 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Einzelnes Holding-Register schreiben (0x06) und danach aktualisieren."""
         async with self._io_lock:
             client = await self._ensure_connected()
-            rr = await self._call_with_slave(
-                client.write_register, address=address, value=int(value)
-            )
+            try:
+                rr = await self._call_with_slave(
+                    client.write_register, address=address, value=int(value)
+                )
+            except Exception as err:  # noqa: BLE001
+                raise HomeAssistantError(
+                    f"Schreiben auf Register {address} fehlgeschlagen: {err}"
+                ) from err
             if rr.isError():
                 raise HomeAssistantError(
-                    f"Schreiben auf Register {address} fehlgeschlagen"
+                    f"Schreiben auf Register {address} fehlgeschlagen: {rr}"
                 )
         await self.async_request_refresh()
 
@@ -245,14 +254,19 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Mehrere aufeinanderfolgende Holding-Register schreiben (0x10)."""
         async with self._io_lock:
             client = await self._ensure_connected()
-            rr = await self._call_with_slave(
-                client.write_registers,
-                address=address,
-                values=[int(v) for v in values],
-            )
+            try:
+                rr = await self._call_with_slave(
+                    client.write_registers,
+                    address=address,
+                    values=[int(v) for v in values],
+                )
+            except Exception as err:  # noqa: BLE001
+                raise HomeAssistantError(
+                    f"Schreiben ab Register {address} fehlgeschlagen: {err}"
+                ) from err
             if rr.isError():
                 raise HomeAssistantError(
-                    f"Schreiben ab Register {address} fehlgeschlagen"
+                    f"Schreiben ab Register {address} fehlgeschlagen: {rr}"
                 )
         await self.async_request_refresh()
 
