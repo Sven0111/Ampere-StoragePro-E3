@@ -123,6 +123,9 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         self._client: AsyncModbusTcpClient | None = None
+        # pymodbus benannte den Slave-Parameter um: 3.x = "slave", 4.x = "device_id".
+        # Wird beim ersten erfolgreichen Aufruf ermittelt und gemerkt.
+        self._slave_kwarg: str | None = None
         self._batches = create_batches(SENSOR_DEFINITIONS)
         self.device_info_data: dict[str, str | None] = {
             "model": None,
@@ -147,14 +150,33 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Keine Verbindung zu {self.host}:{self.port}")
         return self._client
 
+    async def _call_read(self, client: AsyncModbusTcpClient, start: int, count: int):
+        """read_input_registers mit dem passenden slave/device_id-Keyword."""
+        if self._slave_kwarg is not None:
+            return await client.read_input_registers(
+                address=start, count=count, **{self._slave_kwarg: self.slave}
+            )
+        # Erstaufruf: device_id (pymodbus >=4) bevorzugen, sonst slave (3.x)
+        try:
+            result = await client.read_input_registers(
+                address=start, count=count, device_id=self.slave
+            )
+        except TypeError:
+            result = await client.read_input_registers(
+                address=start, count=count, slave=self.slave
+            )
+            self._slave_kwarg = "slave"
+        else:
+            self._slave_kwarg = "device_id"
+        return result
+
     async def _read_block(
         self, client: AsyncModbusTcpClient, start: int, count: int, timeout: int = 5
     ) -> list[int] | None:
         """Einen Registerblock lesen (Input Register)."""
         try:
             rr = await asyncio.wait_for(
-                client.read_input_registers(address=start, count=count, slave=self.slave),
-                timeout=timeout,
+                self._call_read(client, start, count), timeout=timeout
             )
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Fehler beim Lesen von Adresse %s: %s", start, err)
