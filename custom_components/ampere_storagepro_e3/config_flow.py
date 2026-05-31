@@ -10,11 +10,27 @@ _LOGGER = logging.getLogger(__name__)
 
 # ------------------ Hilfsfunktionen ------------------
 
+async def _read_input_registers(client, slave, address, count):
+    """read_input_registers mit dem passenden slave/device_id-Keyword.
+
+    pymodbus benannte den Parameter um: 3.x = "slave", 4.x = "device_id".
+    Erst device_id versuchen, bei TypeError auf slave zurueckfallen.
+    """
+    try:
+        return await client.read_input_registers(
+            address=address, count=count, device_id=slave
+        )
+    except TypeError:
+        return await client.read_input_registers(
+            address=address, count=count, slave=slave
+        )
+
+
 async def read_ascii_registers(client, slave, address, count):
     """Liest eine Reihe Modbus-Register und dekodiert ASCII."""
     try:
         rr = await asyncio.wait_for(
-            client.read_input_registers(address=address, count=count, slave=slave),
+            _read_input_registers(client, slave, address, count),
             timeout=5,
         )
         if rr.isError():

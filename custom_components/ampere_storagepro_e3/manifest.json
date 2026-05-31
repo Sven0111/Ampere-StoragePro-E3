@@ -7,5 +7,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Sven0111/Ampere-StoragePro-E3/issues",
   "requirements": ["pymodbus>=3.6.8"],
-  "version": "2.6.1"
+  "version": "2.6.2"
 }
