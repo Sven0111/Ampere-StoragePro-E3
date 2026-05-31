@@ -8,6 +8,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pymodbus.client import AsyncModbusTcpClient
 
@@ -18,6 +19,9 @@ from .sensors import SENSOR_DEFINITIONS
 _LOGGER = logging.getLogger(__name__)
 
 _MAX_REGS_PER_BATCH = 120  # Maximal 120 Register pro Batch
+
+# Holding-Register (0x03/0x06), deren Ist-Wert für Steuer-Entitäten gelesen wird
+_CONTROL_REGISTERS = (49209, 49221)  # Buzzer, Brightness
 
 
 # ----------------------------- Dekodier-Helfer -----------------------------
@@ -126,6 +130,9 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         # pymodbus benannte den Slave-Parameter um: 3.x = "slave", 4.x = "device_id".
         # Wird beim ersten erfolgreichen Aufruf ermittelt und gemerkt.
         self._slave_kwarg: str | None = None
+        # Serialisiert alle Modbus-IO (Polling + Schreibvorgänge) auf der
+        # gemeinsamen, persistenten Verbindung.
+        self._io_lock = asyncio.Lock()
         self._batches = create_batches(SENSOR_DEFINITIONS)
         self.device_info_data: dict[str, str | None] = {
             "model": None,
@@ -186,6 +193,69 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         return rr.registers
 
+    # -- Holding-Register (0x03 / 0x06 / 0x10) ----------------------------
+    async def _call_with_slave(self, func, **kwargs):
+        """Modbus-Aufruf mit dem passenden slave/device_id-Keyword (3.x/4.x)."""
+        if self._slave_kwarg is not None:
+            return await func(**kwargs, **{self._slave_kwarg: self.slave})
+        try:
+            result = await func(**kwargs, device_id=self.slave)
+        except TypeError:
+            result = await func(**kwargs, slave=self.slave)
+            self._slave_kwarg = "slave"
+        else:
+            self._slave_kwarg = "device_id"
+        return result
+
+    async def _read_holding(
+        self, client: AsyncModbusTcpClient, address: int, count: int = 1, timeout: int = 5
+    ) -> list[int] | None:
+        """Holding-Register lesen (0x03)."""
+        try:
+            rr = await asyncio.wait_for(
+                self._call_with_slave(
+                    client.read_holding_registers, address=address, count=count
+                ),
+                timeout=timeout,
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Fehler beim Holding-Read %s: %s", address, err)
+            return None
+        if rr.isError():
+            _LOGGER.debug("Modbus-Fehler beim Holding-Read %s", address)
+            return None
+        return rr.registers
+
+    async def async_write_holding(self, address: int, value: int) -> None:
+        """Einzelnes Holding-Register schreiben (0x06) und danach aktualisieren."""
+        async with self._io_lock:
+            client = await self._ensure_connected()
+            rr = await self._call_with_slave(
+                client.write_register, address=address, value=int(value)
+            )
+            if rr.isError():
+                raise HomeAssistantError(
+                    f"Schreiben auf Register {address} fehlgeschlagen"
+                )
+        await self.async_request_refresh()
+
+    async def async_write_holding_block(
+        self, address: int, values: list[int]
+    ) -> None:
+        """Mehrere aufeinanderfolgende Holding-Register schreiben (0x10)."""
+        async with self._io_lock:
+            client = await self._ensure_connected()
+            rr = await self._call_with_slave(
+                client.write_registers,
+                address=address,
+                values=[int(v) for v in values],
+            )
+            if rr.isError():
+                raise HomeAssistantError(
+                    f"Schreiben ab Register {address} fehlgeschlagen"
+                )
+        await self.async_request_refresh()
+
     # -- Einmaliges Setup -------------------------------------------------
     async def _async_setup(self) -> None:
         """Einmalig vor dem ersten Refresh: Geräte-Info + Connect-Flags."""
@@ -219,29 +289,38 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
     # -- Periodisches Update ---------------------------------------------
     async def _async_update_data(self) -> dict[str, Any]:
         """Alle Batches lesen und dekodieren."""
-        client = await self._ensure_connected()
         data: dict[str, Any] = {}
         read_any = False
 
-        for start, end, defs in self._batches:
-            count = end - start + 1
-            regs = await self._read_block(client, start, count)
-            if regs is None:
-                continue
-            read_any = True
-            for sd in defs:
-                addr, sd_count = sd[1], sd[2]
-                start_idx = addr - start
-                end_idx = start_idx + sd_count
-                if start_idx < 0 or end_idx > len(regs):
-                    continue
-                try:
-                    data[sd[0]] = _decode_definition(sd, regs[start_idx:end_idx])
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("Dekodierfehler für %s: %s", sd[0], err)
+        async with self._io_lock:
+            client = await self._ensure_connected()
 
-        if not read_any:
-            raise UpdateFailed("Kein einziger Registerblock konnte gelesen werden")
+            for start, end, defs in self._batches:
+                count = end - start + 1
+                regs = await self._read_block(client, start, count)
+                if regs is None:
+                    continue
+                read_any = True
+                for sd in defs:
+                    addr, sd_count = sd[1], sd[2]
+                    start_idx = addr - start
+                    end_idx = start_idx + sd_count
+                    if start_idx < 0 or end_idx > len(regs):
+                        continue
+                    try:
+                        data[sd[0]] = _decode_definition(sd, regs[start_idx:end_idx])
+                    except Exception as err:  # noqa: BLE001
+                        _LOGGER.debug("Dekodierfehler für %s: %s", sd[0], err)
+
+            if not read_any:
+                raise UpdateFailed("Kein einziger Registerblock konnte gelesen werden")
+
+            # Steuer-Register (Holding) lesen – Fehler hier sind nicht fatal,
+            # die jeweilige Steuer-Entität wird dann nur "unavailable".
+            for addr in _CONTROL_REGISTERS:
+                regs = await self._read_holding(client, addr, 1)
+                if regs:
+                    data[f"ctrl_{addr}"] = regs[0]
 
         return data
 
@@ -251,3 +330,16 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._client is not None:
             self._client.close()
             self._client = None
+
+
+def ampere_device_info(coordinator: AmpereStorageProE3Coordinator) -> dict[str, Any]:
+    """Gemeinsame DeviceInfo für alle Plattformen dieser Integration."""
+    info = coordinator.device_info_data
+    ident = f"{coordinator.host}_{coordinator.port}_{coordinator.slave}"
+    return {
+        "identifiers": {(DOMAIN, ident)},
+        "name": "Ampere StoragePro E3",
+        "manufacturer": info.get("manufacturer") or "Ampere",
+        "model": info.get("model") or "FoxESS",
+        "serial_number": info.get("serial") or "N/A",
+    }

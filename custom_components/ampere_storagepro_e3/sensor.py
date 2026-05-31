@@ -16,8 +16,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import AmpereStorageProE3Coordinator
+from .coordinator import AmpereStorageProE3Coordinator, ampere_device_info
 from .sensors import SENSOR_DEFINITIONS
 
 _LOGGER = logging.getLogger(__name__)
@@ -151,17 +150,7 @@ class AmpereModbusSensor(CoordinatorEntity[AmpereStorageProE3Coordinator], Senso
 
     @property
     def device_info(self) -> dict[str, Any]:
-        info = self.coordinator.device_info_data
-        host = self.coordinator.host
-        port = self.coordinator.port
-        slave = self.coordinator.slave
-        return {
-            "identifiers": {(DOMAIN, f"{host}_{port}_{slave}")},
-            "name": "Ampere StoragePro E3",
-            "manufacturer": info.get("manufacturer") or "Ampere",
-            "model": info.get("model") or "FoxESS",
-            "serial_number": info.get("serial") or "N/A",
-        }
+        return ampere_device_info(self.coordinator)
 
     @property
     def native_value(self) -> Any:
