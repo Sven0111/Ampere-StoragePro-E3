@@ -9,13 +9,23 @@
           "port": "Port",
           "slave_id": "Modbus slave ID"
         }
+      },
+      "reconfigure": {
+        "title": "Adjust connection",
+        "description": "Change host, port or slave ID of the inverter.",
+        "data": {
+          "host": "Host / IP address",
+          "port": "Port",
+          "slave_id": "Modbus slave ID"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the device. Please check host, port and slave ID."
     },
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "reconfigure_successful": "Configuration updated."
     }
   },
   "options": {

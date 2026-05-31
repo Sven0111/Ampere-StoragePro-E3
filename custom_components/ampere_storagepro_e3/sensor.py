@@ -4,7 +4,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -25,6 +29,32 @@ _CONNECT_PREFIX = {
     "Meter1": "meter1",
     "Meter2": "meter2",
 }
+
+# Device-Classes, die einen momentanen Messwert darstellen -> state_class measurement
+_MEASUREMENT_DEVICE_CLASSES = {
+    SensorDeviceClass.POWER,
+    SensorDeviceClass.VOLTAGE,
+    SensorDeviceClass.CURRENT,
+    SensorDeviceClass.TEMPERATURE,
+    SensorDeviceClass.FREQUENCY,
+    SensorDeviceClass.BATTERY,
+}
+
+_ENERGY_UNITS = {"kWh", "Wh"}
+
+# Schlüsselwörter, die einen Metadaten-/Info-Sensor kennzeichnen
+_DIAGNOSTIC_KEYWORDS = (
+    "version", "connect", "flag", "mfg", "model",
+    "number of", "protocol", "reserve", "sn", "pn",
+)
+
+
+def _is_diagnostic(name: str, dtype: str) -> bool:
+    """Metadaten-/Info-Sensoren als Diagnose einstufen (String- und Versions-/ID-Werte)."""
+    if dtype == "str":
+        return True
+    lname = name.lower()
+    return any(keyword in lname for keyword in _DIAGNOSTIC_KEYWORDS)
 
 
 async def async_setup_entry(
@@ -49,11 +79,11 @@ async def async_setup_entry(
 
     entities: list[AmpereModbusSensor] = []
     for sd in SENSOR_DEFINITIONS:
-        name, _addr, _count, _scale, _unit, _dtype, cat, _dc, _enabled, visible = sd
+        name, _addr, _count, _scale, _unit, dtype, _cat, _dc, _enabled, visible = sd
 
         if not visible:
             continue
-        if not enable_diag and cat == EntityCategory.DIAGNOSTIC:
+        if not enable_diag and _is_diagnostic(name, dtype):
             continue
 
         # Nicht verbundene BMS/Meter überspringen
@@ -80,7 +110,7 @@ class AmpereModbusSensor(CoordinatorEntity[AmpereStorageProE3Coordinator], Senso
         definition: tuple,
     ) -> None:
         super().__init__(coordinator)
-        name, _addr, _count, _scale, unit, dtype, cat, device_class, enabled, _vis = (
+        name, _addr, _count, _scale, unit, dtype, _cat, device_class, enabled, _vis = (
             definition
         )
 
@@ -91,18 +121,33 @@ class AmpereModbusSensor(CoordinatorEntity[AmpereStorageProE3Coordinator], Senso
         port = coordinator.port
         slave = coordinator.slave
 
+        is_diagnostic = _is_diagnostic(name, dtype)
+
         self._attr_name = name
         # unique_id-Schema unverändert beibehalten (keine History-Verluste)
         self._attr_unique_id = f"{host}_{port}_{slave}_{name.replace(' ', '_')}"
         self._attr_native_unit_of_measurement = unit or None
-        self._attr_entity_category = cat
+        self._attr_entity_category = (
+            EntityCategory.DIAGNOSTIC if is_diagnostic else None
+        )
         self._attr_entity_registry_enabled_default = enabled
 
         # Bit-Sensoren sind reine Text-Sensoren (kein enum mit leeren options)
         if not dtype.startswith("bit"):
             self._attr_device_class = device_class
+
             if device_class == SensorDeviceClass.ENERGY:
-                self._attr_state_class = "total_increasing"
+                self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+            elif device_class in _MEASUREMENT_DEVICE_CLASSES:
+                self._attr_state_class = SensorStateClass.MEASUREMENT
+            elif (
+                device_class is None
+                and unit
+                and unit not in _ENERGY_UNITS
+                and not is_diagnostic
+            ):
+                # numerische Messwerte ohne passende device_class (z. B. Var, VA, Ah)
+                self._attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def device_info(self) -> dict[str, Any]:

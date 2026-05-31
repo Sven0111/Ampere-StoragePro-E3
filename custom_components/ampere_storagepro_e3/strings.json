@@ -9,13 +9,23 @@
           "port": "Port",
           "slave_id": "Modbus Slave-ID"
         }
+      },
+      "reconfigure": {
+        "title": "Verbindung anpassen",
+        "description": "Host, Port oder Slave-ID des Wechselrichters aendern.",
+        "data": {
+          "host": "Host / IP-Adresse",
+          "port": "Port",
+          "slave_id": "Modbus Slave-ID"
+        }
       }
     },
     "error": {
       "cannot_connect": "Verbindung zum Geraet fehlgeschlagen. Bitte Host, Port und Slave-ID pruefen."
     },
     "abort": {
-      "already_configured": "Dieses Geraet ist bereits eingerichtet."
+      "already_configured": "Dieses Geraet ist bereits eingerichtet.",
+      "reconfigure_successful": "Konfiguration aktualisiert."
     }
   },
   "options": {

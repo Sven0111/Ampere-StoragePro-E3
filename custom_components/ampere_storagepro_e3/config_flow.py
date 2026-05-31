@@ -107,6 +107,42 @@ class AmpereStorageProE3ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=schema, errors=errors
         )
 
+    async def async_step_reconfigure(self, user_input=None):
+        """Host/Port/Slave-ID einer bestehenden Integration aendern."""
+        entry = self._get_reconfigure_entry()
+        errors = {}
+
+        if user_input is not None:
+            info = await read_device_info(
+                user_input["host"],
+                user_input["port"],
+                user_input["slave_id"],
+            )
+
+            if not info["model"] and not info["serial"]:
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={
+                        "host": user_input["host"],
+                        "port": user_input["port"],
+                        "slave_id": user_input["slave_id"],
+                        "model_name": info["model"],
+                        "serial_number": info["serial"],
+                        "manufacturer": info["manufacturer"],
+                    },
+                )
+
+        schema = vol.Schema({
+            vol.Required("host", default=entry.data["host"]): str,
+            vol.Required("port", default=entry.data["port"]): int,
+            vol.Required("slave_id", default=entry.data["slave_id"]): int,
+        })
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=schema, errors=errors
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
