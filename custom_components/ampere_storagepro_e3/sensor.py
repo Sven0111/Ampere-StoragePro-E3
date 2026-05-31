@@ -21,6 +21,17 @@ from .sensors import SENSOR_DEFINITIONS
 
 _LOGGER = logging.getLogger(__name__)
 
+# Status-Holding-Register (RO), die der Coordinator als ctrl_<addr> bereitstellt
+_NETWORK_STATUS_REGISTER = 49240
+_GFCI_CURRENT_REGISTER = 49249
+_TRIGGER_SIGNAL_REGISTER = 49242
+
+_NETWORK_STATUS_TEXT = {
+    0: "Not connected",
+    1: "Disconnection",
+    2: "Connection",
+}
+
 # Präfix -> Schlüssel in coordinator.connected_flags
 _CONNECT_PREFIX = {
     "BMS1": "bms1",
@@ -96,7 +107,14 @@ async def async_setup_entry(
 
         entities.append(AmpereModbusSensor(coordinator, entry, sd))
 
-    async_add_entities(entities)
+    # Status-Sensoren aus Holding-Registern (unabhängig von SENSOR_DEFINITIONS)
+    status_entities: list[CoordinatorEntity] = [
+        AmpereNetworkStatusSensor(coordinator),
+        AmpereGfciCurrentSensor(coordinator),
+        AmpereTriggerSignalSensor(coordinator),
+    ]
+
+    async_add_entities([*entities, *status_entities])
 
 
 class AmpereModbusSensor(CoordinatorEntity[AmpereStorageProE3Coordinator], SensorEntity):
@@ -159,3 +177,83 @@ class AmpereModbusSensor(CoordinatorEntity[AmpereStorageProE3Coordinator], Senso
     @property
     def available(self) -> bool:
         return super().available and self._key in self.coordinator.data
+
+
+class _AmpereStatusSensorBase(
+    CoordinatorEntity[AmpereStorageProE3Coordinator], SensorEntity
+):
+    """Basis für Status-Sensoren, die aus einem Holding-Register (ctrl_<addr>) stammen."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, coordinator: AmpereStorageProE3Coordinator, register: int, suffix: str
+    ) -> None:
+        super().__init__(coordinator)
+        self._key = f"ctrl_{register}"
+        self._attr_unique_id = (
+            f"{coordinator.host}_{coordinator.port}_{coordinator.slave}_{suffix}"
+        )
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return ampere_device_info(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._key in self.coordinator.data
+
+
+class AmpereNetworkStatusSensor(_AmpereStatusSensorBase):
+    """Netzwerk-/Cloud-Verbindungsstatus (Register 49240)."""
+
+    _attr_name = "Network Status"
+
+    def __init__(self, coordinator: AmpereStorageProE3Coordinator) -> None:
+        super().__init__(coordinator, _NETWORK_STATUS_REGISTER, "network_status")
+
+    @property
+    def native_value(self) -> str | None:
+        value = self.coordinator.data.get(self._key)
+        if value is None:
+            return None
+        return _NETWORK_STATUS_TEXT.get(value, f"Unknown ({value})")
+
+
+class AmpereGfciCurrentSensor(_AmpereStatusSensorBase):
+    """Fehlerstrom (GFCI Current, Register 49249, I16, Gain 100)."""
+
+    _attr_name = "GFCI Current"
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "A"
+
+    def __init__(self, coordinator: AmpereStorageProE3Coordinator) -> None:
+        super().__init__(coordinator, _GFCI_CURRENT_REGISTER, "gfci_current")
+
+    @property
+    def native_value(self) -> float | None:
+        value = self.coordinator.data.get(self._key)
+        if value is None:
+            return None
+        # I16: vorzeichenbehaftet interpretieren
+        if value >= 0x8000:
+            value -= 0x10000
+        return round(value / 100, 2)
+
+
+class AmpereTriggerSignalSensor(_AmpereStatusSensorBase):
+    """Trigger-Signale K1–K4 als Klartext (Register 49242, Bitfeld)."""
+
+    _attr_name = "Trigger Signal"
+
+    def __init__(self, coordinator: AmpereStorageProE3Coordinator) -> None:
+        super().__init__(coordinator, _TRIGGER_SIGNAL_REGISTER, "trigger_signal")
+
+    @property
+    def native_value(self) -> str | None:
+        value = self.coordinator.data.get(self._key)
+        if value is None:
+            return None
+        active = [f"K{bit + 1}" for bit in range(4) if value & (1 << bit)]
+        return ", ".join(active) if active else "None"

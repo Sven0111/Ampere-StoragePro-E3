@@ -20,8 +20,17 @@ _LOGGER = logging.getLogger(__name__)
 
 _MAX_REGS_PER_BATCH = 120  # Maximal 120 Register pro Batch
 
-# Holding-Register (0x03/0x06), deren Ist-Wert für Steuer-Entitäten gelesen wird
-_CONTROL_REGISTERS = (49079, 49203, 49209, 49221)  # Grid code, Work mode, Buzzer, Brightness
+# Holding-Register (0x03/0x06), deren Ist-Wert für Steuer-/Status-Entitäten gelesen wird
+_CONTROL_REGISTERS = (
+    49079,  # Grid standard code
+    49203,  # Work mode
+    49209,  # Buzzer
+    49221,  # Brightness
+    49228,  # System Power State (RO)
+    49240,  # Network status (RO)
+    49242,  # Trigger Signal K1-K4 (RO)
+    49249,  # GFCI Current (RO)
+)
 
 
 # ----------------------------- Dekodier-Helfer -----------------------------
