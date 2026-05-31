@@ -151,9 +151,9 @@ SENSOR_DEFINITIONS = [
     ("Status 1", 39063, 1, 1, "", "bit16", None, None, False, True), #133 bit0: Standby, bit1: reserved, bit2: Operation, bit3: reserved, bit4: reserved, bit5: reserved, bit6: Fault, bit7: reserved
     ("Status 2 reserved", 39064, 1, 1, "", "bit16", None, None, False, False), #134
     ("Status 3", 39065, 2, 1, "", "bit16", None, None, False, True), #135 0: Not off-grid, 1: Off-grid
-    ("Alarm 1", 39067, 1, 1, "", "bit6", None, None, False, True), #136 # see list of alarms
-    ("Alarm 2", 39068, 1, 1, "", "bit6", None, None, False, True), #137 # see list of alarms
-    ("Alarm 3", 39069, 1, 1, "", "bit6", None, None, False, True), #138 # see list of alarms
+    ("Alarm 1", 39067, 1, 1, "", "bit16", None, None, True, True), #136 # see list of alarms
+    ("Alarm 2", 39068, 1, 1, "", "bit16", None, None, True, True), #137 # see list of alarms
+    ("Alarm 3", 39069, 1, 1, "", "bit16", None, None, True, True), #138 # see list of alarms
     # ----------------- PV Eingänge -----------------
     ("PV1 Voltage", 39070, 1, 0.1, "V", "int16", None, SensorDeviceClass.VOLTAGE, False, True), #139
     ("PV1 Current", 39071, 1, 0.01, "A", "int16", None, SensorDeviceClass.CURRENT, False, True), #140
