@@ -1,3 +1,3 @@
 DOMAIN = "ampere_storagepro_e3"
 DEFAULT_INTERVAL = 30
-PLATFORMS = ["sensor", "switch", "number", "button"]
+PLATFORMS = ["sensor", "switch", "number", "button", "select"]

@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_REGS_PER_BATCH = 120  # Maximal 120 Register pro Batch
 
 # Holding-Register (0x03/0x06), deren Ist-Wert für Steuer-Entitäten gelesen wird
-_CONTROL_REGISTERS = (49209, 49221)  # Buzzer, Brightness
+_CONTROL_REGISTERS = (49203, 49209, 49221)  # Work mode, Buzzer, Brightness
 
 
 # ----------------------------- Dekodier-Helfer -----------------------------
