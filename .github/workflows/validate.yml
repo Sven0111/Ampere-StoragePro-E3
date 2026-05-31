@@ -23,3 +23,6 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+          # "brands" erfordert eine Registrierung im home-assistant/brands-Repo;
+          # bis dahin uebersprungen.
+          ignore: brands
