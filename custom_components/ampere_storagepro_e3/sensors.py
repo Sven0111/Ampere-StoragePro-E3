@@ -2,6 +2,10 @@ from homeassistant.components.sensor import SensorDeviceClass
 
 SENSOR_DEFINITIONS = [
     # ----------------- Table 3-1 Inverter model defenition table -----------------
+    # ("name", "addr", "count", "scale", "unit", "dtype", "cat", "device_class", "enabled", "visible")
+    ("Model name", 30000, 16, 1, "", "str", None, None, True, True), #1
+    ("SN", 30016, 16, 1, "", "str", None, None, True, True), #2
+    ("MFG ID", 30032, 16, 1, "", "str", None, None, True, True), #3
 
     # ----------------- Table 3-2 Inverter version defenition table -----------------
     ("Master Version", 36001, 1, 1, "", "uint16", None, None, True, True), #4
@@ -132,8 +136,8 @@ SENSOR_DEFINITIONS = [
     # ----------------- Protocol -----------------
     ("Protocol Version", 39000, 2, 1, "", "uint32", None, None, True, True), #121
     # ----------------- INFO -----------------
-    ("Model name", 39002, 16, 1, "", "str", None, None, True, True), #122
-    ("SN", 39018, 16, 1, "", "str", None, None, True, True), #123
+    ("Model name 2", 39002, 16, 1, "", "str", None, None, False, True), #122
+    ("SN 2", 39018, 16, 1, "", "str", None, None, False, True), #123
     ("PN", 39034, 16, 1, "", "str", None, None, True, True),  #124
     ("Model ID", 39050, 1, 1, "", "uint16", None, None, True, True), #125
     ("Number of strings", 39051, 1, 1, "", "uint16", None, None, True, True), #126
@@ -144,9 +148,9 @@ SENSOR_DEFINITIONS = [
     ("Maximum apparent power (Smax)", 39057, 2, 0.001, "kVA", "int32", None, None, True, True), #130
     ("Maximum reactive power (Qmax, fed into the grid)", 39059, 2, 0.001, "kVar", "uint32", None, None, True, True), #131
     ("Maximum reactive power (Qmax, absorbed from the grid)", 39061, 2, 0.001, "kVar", "uint32", None, None, True, True), #132
-    ("Status 1", 39063, 1, 1, "", "bit6", None, None, False, True), #133 bit0: Standby, bit1: reserved, bit2: Operation, bit3: reserved, bit4: reserved, bit5: reserved, bit6: Fault, bit7: reserved
-    #("Status 2 reserved", 39064, 1, 1, "", "bit6", None, None, False), #134
-    ("Status 3", 39065, 1, 1, "", "bit6", None, None, False, True), #135 0: Not off-grid, 1: Off-grid
+    ("Status 1", 39063, 1, 1, "", "bit16", None, None, False, True), #133 bit0: Standby, bit1: reserved, bit2: Operation, bit3: reserved, bit4: reserved, bit5: reserved, bit6: Fault, bit7: reserved
+    ("Status 2 reserved", 39064, 1, 1, "", "bit16", None, None, False, False), #134
+    ("Status 3", 39065, 2, 1, "", "bit16", None, None, False, True), #135 0: Not off-grid, 1: Off-grid
     ("Alarm 1", 39067, 1, 1, "", "bit6", None, None, False, True), #136 # see list of alarms
     ("Alarm 2", 39068, 1, 1, "", "bit6", None, None, False, True), #137 # see list of alarms
     ("Alarm 3", 39069, 1, 1, "", "bit6", None, None, False, True), #138 # see list of alarms
@@ -215,7 +219,7 @@ SENSOR_DEFINITIONS = [
     ("Load Combined Power", 39225, 2, 1, "W", "int32", None, SensorDeviceClass.POWER, False, True), #200
     ("Battery 1 Voltage_", 39227, 1, 0.1, "V", "uint16", None, SensorDeviceClass.VOLTAGE, False, True), #201
     ("Battery 1 Current_", 39228, 2, 0.001, "A", "int32", None, SensorDeviceClass.CURRENT, False, True), #202
-    ("Battery Power_", 39230, 2, 1, "W", "int32", None, SensorDeviceClass.POWER, False, True), #203
+    ("Battery 1 Power_", 39230, 2, 1, "W", "int32", None, SensorDeviceClass.POWER, False, True), #203
     ("Battery 2 Voltage_", 39232, 1, 0.1, "V", "uint16", None, SensorDeviceClass.VOLTAGE, False, True), #204
     ("Battery 2 Current_", 39233, 2, 0.001, "A", "int32", None, SensorDeviceClass.CURRENT, False, True), #205
     ("Battery 2 Power_", 39235, 2, 1, "W", "int32", None, SensorDeviceClass.POWER, False, True), #206

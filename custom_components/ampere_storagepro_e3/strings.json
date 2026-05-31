@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ampere StoragePro E3",
+        "description": "Verbindung zum Wechselrichter per Modbus TCP einrichten.",
+        "data": {
+          "host": "Host / IP-Adresse",
+          "port": "Port",
+          "slave_id": "Modbus Slave-ID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum Geraet fehlgeschlagen. Bitte Host, Port und Slave-ID pruefen."
+    },
+    "abort": {
+      "already_configured": "Dieses Geraet ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Optionen",
+        "data": {
+          "update_interval": "Aktualisierungsintervall (Sekunden)",
+          "enable_diagnostics": "Diagnose-Sensoren aktivieren"
+        }
+      }
+    }
+  }
+}

@@ -37,7 +37,7 @@ async def read_device_info(host, port, slave):
 
             info["model"] = await read_ascii_registers(client, slave, 30000, 16)
             info["serial"] = await read_ascii_registers(client, slave, 30016, 16)
-            info["manufacturer"] = await read_ascii_registers(client, slave, 30032, 8)
+            info["manufacturer"] = await read_ascii_registers(client, slave, 30032, 16)
 
             _LOGGER.debug("Device info read: %s", info)
 
@@ -54,6 +54,8 @@ class AmpereStorageProE3ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         _LOGGER.debug("Starting async_step_user with input: %s", user_input)
 
+        errors = {}
+
         if user_input is not None:
             info = await read_device_info(
                 user_input["host"],
@@ -66,28 +68,44 @@ class AmpereStorageProE3ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 info["model"], info["serial"], info["manufacturer"]
             )
 
-            title = f"{info['model'] or 'Ampere StoragePro E3'} ({user_input['host']})"
+            # Konnte das Geraet nicht erreicht/identifiziert werden, abbrechen
+            # statt einen unbrauchbaren Eintrag anzulegen.
+            if not info["model"] and not info["serial"]:
+                errors["base"] = "cannot_connect"
+            else:
+                # Eindeutige ID, damit dasselbe Geraet nicht doppelt
+                # eingerichtet werden kann. Seriennummer bevorzugt,
+                # sonst Host/Port/Slave als Fallback.
+                unique_id = info["serial"] or (
+                    f"{user_input['host']}_{user_input['port']}_{user_input['slave_id']}"
+                )
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
 
-            # Im Config-Entry speichern
-            user_input["model_name"] = info["model"]
-            user_input["serial_number"] = info["serial"]
-            user_input["manufacturer"] = info["manufacturer"]
+                title = f"{info['model'] or 'Ampere StoragePro E3'} ({user_input['host']})"
 
-            return self.async_create_entry(
-                title=title,
-                data=user_input,
-                options={
-                    "update_interval": DEFAULT_INTERVAL,
-                    "enable_diagnostics": True,
-                },
-            )
+                # Im Config-Entry speichern
+                user_input["model_name"] = info["model"]
+                user_input["serial_number"] = info["serial"]
+                user_input["manufacturer"] = info["manufacturer"]
+
+                return self.async_create_entry(
+                    title=title,
+                    data=user_input,
+                    options={
+                        "update_interval": DEFAULT_INTERVAL,
+                        "enable_diagnostics": True,
+                    },
+                )
 
         schema = vol.Schema({
             vol.Required("host", default="127.0.0.1"): str,
             vol.Required("port", default=502): int,
             vol.Required("slave_id", default=247): int,
         })
-        return self.async_show_form(step_id="user", data_schema=schema)
+        return self.async_show_form(
+            step_id="user", data_schema=schema, errors=errors
+        )
 
     @staticmethod
     @callback

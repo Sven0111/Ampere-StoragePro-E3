@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ampere StoragePro E3",
+        "description": "Set up the connection to the inverter via Modbus TCP.",
+        "data": {
+          "host": "Host / IP address",
+          "port": "Port",
+          "slave_id": "Modbus slave ID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the device. Please check host, port and slave ID."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "update_interval": "Update interval (seconds)",
+          "enable_diagnostics": "Enable diagnostic sensors"
+        }
+      }
+    }
+  }
+}
