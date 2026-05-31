@@ -61,6 +61,7 @@ class AmpereChargeModeSelect(
         return _VALUE_TO_OPTION.get(self.coordinator.data.get(self._key))
 
     async def async_select_option(self, option: str) -> None:
-        await self.coordinator.async_write_holding(
+        # Work mode ist ein geschuetztes Register -> authentifiziert schreiben
+        await self.coordinator.async_write_with_key(
             _WORKMODE_REGISTER, _OPTION_TO_VALUE[option]
         )

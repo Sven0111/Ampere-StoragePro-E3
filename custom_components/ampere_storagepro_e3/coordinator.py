@@ -270,6 +270,36 @@ class AmpereStorageProE3Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         await self.async_request_refresh()
 
+    async def async_write_with_key(self, address: int, value: int) -> None:
+        """Authentifiziertes Schreiben: erst Key (49232) zurueckschreiben, dann Zielregister.
+
+        Hypothese: Schreibzugriffe auf geschuetzte Register sind erst nach
+        'Authentifizierung' erlaubt. Dazu wird der statische Schluessel aus 49232
+        gelesen und unveraendert zurueckgeschrieben (echo), danach der eigentliche
+        Wert. Alles in einer Verbindung/Sitzung (gemeinsamer Lock), da die
+        Berechtigung nach Timeout ablaeuft.
+        """
+        async with self._io_lock:
+            client = await self._ensure_connected()
+            try:
+                key = await self._read_holding(client, 49232, 8)
+                if key:
+                    await self._call_with_slave(
+                        client.write_registers, address=49232, values=list(key)
+                    )
+                rr = await self._call_with_slave(
+                    client.write_register, address=address, value=int(value)
+                )
+            except Exception as err:  # noqa: BLE001
+                raise HomeAssistantError(
+                    f"Authentifiziertes Schreiben auf {address} fehlgeschlagen: {err}"
+                ) from err
+            if rr.isError():
+                raise HomeAssistantError(
+                    f"Authentifiziertes Schreiben auf {address} fehlgeschlagen: {rr}"
+                )
+        await self.async_request_refresh()
+
     # -- Einmaliges Setup -------------------------------------------------
     async def _async_setup(self) -> None:
         """Einmalig vor dem ersten Refresh: Geräte-Info + Connect-Flags."""
